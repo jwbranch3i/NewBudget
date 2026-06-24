@@ -1,4 +1,4 @@
-package com.newbudget.persistence;
+package com.newbudget.data;
 
 import com.newbudget.model.CategoryRecord;
 import com.newbudget.model.CategoryType;
@@ -27,9 +27,7 @@ public class BudgetRepository {
     ) {
         Integer existingId = findCategoryByPath(path);
         if (existingId != null) {
-            if (defaultType == CategoryType.INCOME) {
-                updateDefaultType(existingId, defaultType);
-            }
+            updateCategoryFromImport(existingId, name, parentId, sortOrder, defaultType);
             return existingId;
         }
 
@@ -70,6 +68,16 @@ public class BudgetRepository {
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to mark rollup category", e);
+        }
+    }
+
+    public void resetRollups() {
+        String sql = "UPDATE categories SET is_rollup = 0";
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to reset rollup categories", e);
         }
     }
 
@@ -338,15 +346,35 @@ public class BudgetRepository {
         return null;
     }
 
-    private void updateDefaultType(int categoryId, CategoryType categoryType) {
-        String sql = "UPDATE categories SET default_type = ? WHERE id = ?";
+    private void updateCategoryFromImport(
+        int categoryId,
+        String name,
+        Integer parentId,
+        int sortOrder,
+        CategoryType defaultType
+    ) {
+        String sql = """
+            UPDATE categories
+            SET name = ?,
+                parent_id = ?,
+                sort_order = ?,
+                default_type = ?
+            WHERE id = ?
+            """;
         try (Connection connection = Database.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, categoryType.name());
-            statement.setInt(2, categoryId);
+            statement.setString(1, name);
+            if (parentId == null) {
+                statement.setNull(2, java.sql.Types.INTEGER);
+            } else {
+                statement.setInt(2, parentId);
+            }
+            statement.setInt(3, sortOrder);
+            statement.setString(4, defaultType.name());
+            statement.setInt(5, categoryId);
             statement.executeUpdate();
         } catch (SQLException e) {
-            throw new IllegalStateException("Failed to update default category type", e);
+            throw new IllegalStateException("Failed to update imported category", e);
         }
     }
 

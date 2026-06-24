@@ -1,11 +1,10 @@
 package com.newbudget;
 
-import com.newbudget.model.BudgetLine;
 import com.newbudget.model.CategoryType;
 import com.newbudget.model.MonthSnapshot;
-import com.newbudget.persistence.BudgetRepository;
-import com.newbudget.persistence.CsvActualImporter;
-import com.newbudget.persistence.Database;
+import com.newbudget.data.BudgetRepository;
+import com.newbudget.data.CsvActualImporter;
+import com.newbudget.data.Database;
 import com.newbudget.service.BudgetService;
 import com.newbudget.ui.BudgetTableRow;
 import javafx.application.Application;
@@ -23,7 +22,6 @@ import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
-import javafx.scene.control.TextField;
 import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
@@ -63,15 +61,18 @@ public class BudgetApp extends Application {
         selectedMonth = repository.getLatestMonthWithData().orElse(YearMonth.now());
 
         BorderPane root = new BorderPane();
+        root.getStyleClass().add("root-pane");
         root.setPadding(new Insets(10));
         root.setTop(buildTopBar(stage));
         root.setCenter(buildTables());
+        statusLabel.getStyleClass().add("status-label");
         root.setBottom(statusLabel);
 
         refreshMonths();
-        loadMonth(selectedMonth);
+        selectMonth(selectedMonth, false);
 
         Scene scene = new Scene(root, 1400, 850);
+        scene.getStylesheets().add(getClass().getResource("/com/newbudget/ui/styles.css").toExternalForm());
         stage.setTitle("NewBudget");
         stage.setScene(scene);
         stage.show();
@@ -79,6 +80,15 @@ public class BudgetApp extends Application {
 
     private HBox buildTopBar(Stage stage) {
         Label monthLabel = new Label("Month:");
+        monthLabel.getStyleClass().add("month-label");
+
+        Button previousMonthButton = new Button("◀ Previous");
+        previousMonthButton.getStyleClass().add("month-nav-button");
+        previousMonthButton.setOnAction(event -> selectMonth(selectedMonth.minusMonths(1), true));
+
+        Button nextMonthButton = new Button("Next ▶");
+        nextMonthButton.getStyleClass().add("month-nav-button");
+        nextMonthButton.setOnAction(event -> selectMonth(selectedMonth.plusMonths(1), true));
 
         monthPicker.setConverter(new StringConverter<>() {
             @Override
@@ -94,60 +104,73 @@ public class BudgetApp extends Application {
         monthPicker.setOnAction(event -> {
             YearMonth chosen = monthPicker.getValue();
             if (chosen != null) {
-                selectedMonth = chosen;
-                loadMonth(chosen);
+                selectMonth(chosen, false);
             }
         });
+        monthPicker.getStyleClass().add("month-picker");
 
         Button importCsvButton = new Button("Import Actuals CSV");
+        importCsvButton.getStyleClass().add("action-button");
         importCsvButton.setOnAction(event -> importCsv(stage));
 
         Button currentMonthButton = new Button("Use Current Month");
+        currentMonthButton.getStyleClass().add("secondary-button");
         currentMonthButton.setOnAction(event -> {
-            selectedMonth = YearMonth.now();
-            repository.ensureMonthlyClassificationsFromDefaults(selectedMonth);
-            refreshMonths();
-            monthPicker.setValue(selectedMonth);
-            loadMonth(selectedMonth);
+            selectMonth(YearMonth.now(), true);
         });
 
-        HBox bar = new HBox(10, monthLabel, monthPicker, importCsvButton, currentMonthButton);
+        HBox bar = new HBox(
+            10,
+            previousMonthButton,
+            nextMonthButton,
+            monthLabel,
+            monthPicker,
+            importCsvButton,
+            currentMonthButton
+        );
+        bar.getStyleClass().add("top-bar");
         bar.setPadding(new Insets(0, 0, 10, 0));
         return bar;
     }
 
     private VBox buildTables() {
-        Label incomeTitle = sectionLabel("INCOME");
         TableView<BudgetTableRow> incomeTable = createTable(incomeRows, false);
 
-        Label mandatoryTitle = sectionLabel("MANDATORY");
         TableView<BudgetTableRow> mandatoryTable = createTable(
             mandatoryRows,
             true,
             row -> budgetService.updateMonthlyClassification(selectedMonth, row.getCategoryId(), CategoryType.DISCRETIONARY)
         );
 
-        Label discretionaryTitle = sectionLabel("DISCRETIONARY");
         TableView<BudgetTableRow> discretionaryTable = createTable(
             discretionaryRows,
             true,
             row -> budgetService.updateMonthlyClassification(selectedMonth, row.getCategoryId(), CategoryType.MANDATORY)
         );
 
-        VBox container = new VBox(8,
-            incomeTitle, incomeTable,
-            mandatoryTitle, mandatoryTable,
-            discretionaryTitle, discretionaryTable
+        VBox container = new VBox(
+            12,
+            createSectionPane("INCOME", incomeTable),
+            createSectionPane("MANDATORY", mandatoryTable),
+            createSectionPane("DISCRETIONARY", discretionaryTable)
         );
-        VBox.setVgrow(incomeTable, Priority.ALWAYS);
-        VBox.setVgrow(mandatoryTable, Priority.ALWAYS);
-        VBox.setVgrow(discretionaryTable, Priority.ALWAYS);
+        container.getStyleClass().add("sections-root");
+        VBox.setVgrow(container, Priority.ALWAYS);
         return container;
+    }
+
+    private VBox createSectionPane(String title, TableView<BudgetTableRow> table) {
+        Label sectionTitle = sectionLabel(title);
+        VBox section = new VBox(6, sectionTitle, table);
+        section.getStyleClass().add("section-card");
+        section.setPadding(new Insets(8));
+        VBox.setVgrow(table, Priority.ALWAYS);
+        return section;
     }
 
     private Label sectionLabel(String text) {
         Label label = new Label(text);
-        label.setStyle("-fx-font-size: 14px; -fx-font-weight: bold;");
+        label.getStyleClass().add("section-label");
         return label;
     }
 
@@ -162,6 +185,7 @@ public class BudgetApp extends Application {
     ) {
         TableView<BudgetTableRow> table = new TableView<>(rows);
         table.setEditable(true);
+        table.getStyleClass().add("budget-table");
 
         TableColumn<BudgetTableRow, String> categoryColumn = new TableColumn<>("Category");
         categoryColumn.setCellValueFactory(cell -> new javafx.beans.property.SimpleStringProperty(
@@ -201,10 +225,7 @@ public class BudgetApp extends Application {
         budgetColumn.setPrefWidth(180);
 
         table.getColumns().addAll(categoryColumn, actualColumn, budgetColumn, differenceColumn, balanceColumn);
-
-        if (allowMove && moveAction != null) {
-            table.setRowFactory(tv -> createMovableRow(table, moveAction));
-        }
+        table.setRowFactory(tv -> createRow(moveAction, allowMove));
 
         return table;
     }
@@ -231,13 +252,21 @@ public class BudgetApp extends Application {
         return column;
     }
 
-    private TableRow<BudgetTableRow> createMovableRow(
-        TableView<BudgetTableRow> table,
-        Consumer<BudgetTableRow> moveAction
-    ) {
+    private TableRow<BudgetTableRow> createRow(Consumer<BudgetTableRow> moveAction, boolean allowMove) {
         TableRow<BudgetTableRow> row = new TableRow<>();
         row.itemProperty().addListener((obs, oldItem, newItem) -> {
-            if (newItem == null || newItem.getType() == CategoryType.INCOME) {
+            if (newItem == null) {
+                row.getStyleClass().remove("rollup-row");
+                row.setContextMenu(null);
+                return;
+            }
+
+            row.getStyleClass().remove("rollup-row");
+            if (newItem.isRollup()) {
+                row.getStyleClass().add("rollup-row");
+            }
+
+            if (!allowMove || moveAction == null || newItem.getType() == CategoryType.INCOME) {
                 row.setContextMenu(null);
                 return;
             }
@@ -270,10 +299,7 @@ public class BudgetApp extends Application {
 
         try {
             YearMonth importedMonth = csvActualImporter.importFile(file.toPath());
-            selectedMonth = importedMonth;
-            refreshMonths();
-            monthPicker.setValue(importedMonth);
-            loadMonth(importedMonth);
+            selectMonth(importedMonth, true);
             statusLabel.setText("Imported " + file.getName() + " for " + MONTH_DISPLAY.format(importedMonth));
         } catch (Exception ex) {
             showError("Import failed", ex.getMessage());
@@ -302,6 +328,16 @@ public class BudgetApp extends Application {
         } catch (Exception ex) {
             showError("Load failed", ex.getMessage());
         }
+    }
+
+    private void selectMonth(YearMonth month, boolean ensureMonthExists) {
+        selectedMonth = month;
+        if (ensureMonthExists) {
+            repository.ensureMonthlyClassificationsFromDefaults(month);
+        }
+        refreshMonths();
+        monthPicker.setValue(month);
+        loadMonth(month);
     }
 
     private void showError(String title, String message) {

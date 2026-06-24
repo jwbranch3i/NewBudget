@@ -1,4 +1,4 @@
-package com.newbudget.persistence;
+package com.newbudget.data;
 
 import com.newbudget.model.CategoryType;
 import com.opencsv.CSVReader;
@@ -33,9 +33,10 @@ public class CsvActualImporter {
             .orElseThrow(() -> new IllegalArgumentException("Unable to detect month from CSV file"));
 
         repository.clearMonthActuals(month);
+        repository.resetRollups();
 
         Section currentSection = Section.NONE;
-        int sortOrder = repository.getAllCategories().size() + 1;
+        int sortOrder = 1;
 
         Map<Integer, String> pathByDepth = new HashMap<>();
         Map<Integer, Integer> categoryByDepth = new HashMap<>();

@@ -1,0 +1,85 @@
+.root-pane {
+    -fx-background-color: linear-gradient(to bottom, #f7f9fc 0%, #eef2f8 100%);
+}
+
+.top-bar {
+    -fx-padding: 10 10 14 10;
+    -fx-background-color: #ffffff;
+    -fx-background-radius: 10;
+    -fx-border-color: #d8dee9;
+    -fx-border-radius: 10;
+}
+
+.month-label {
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #233142;
+}
+
+.month-picker {
+    -fx-min-width: 170;
+}
+
+.month-nav-button,
+.action-button,
+.secondary-button {
+    -fx-font-size: 12px;
+    -fx-font-weight: 600;
+    -fx-cursor: hand;
+    -fx-padding: 7 12 7 12;
+}
+
+.action-button {
+    -fx-background-color: #2e6fdb;
+    -fx-text-fill: white;
+}
+
+.secondary-button,
+.month-nav-button {
+    -fx-background-color: #e9edf5;
+    -fx-text-fill: #1f2937;
+}
+
+.sections-root {
+    -fx-padding: 2;
+}
+
+.section-card {
+    -fx-background-color: #ffffff;
+    -fx-background-radius: 10;
+    -fx-border-color: #d8dee9;
+    -fx-border-radius: 10;
+}
+
+.section-label {
+    -fx-font-size: 13px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #1e293b;
+    -fx-padding: 0 0 4 2;
+}
+
+.budget-table {
+    -fx-fixed-cell-size: 28;
+    -fx-font-size: 12px;
+}
+
+.budget-table .column-header-background {
+    -fx-background-color: #e7edf7;
+}
+
+.budget-table .column-header,
+.budget-table .filler {
+    -fx-size: 30;
+    -fx-border-color: transparent transparent #c6d0de transparent;
+}
+
+.rollup-row {
+    -fx-font-weight: bold;
+    -fx-background-color: #f7fbff;
+}
+
+.status-label {
+    -fx-padding: 8 2 2 2;
+    -fx-font-size: 12px;
+    -fx-text-fill: #334155;
+}

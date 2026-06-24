@@ -4,7 +4,7 @@ import com.newbudget.model.BudgetLine;
 import com.newbudget.model.CategoryRecord;
 import com.newbudget.model.CategoryType;
 import com.newbudget.model.MonthSnapshot;
-import com.newbudget.persistence.BudgetRepository;
+import com.newbudget.data.BudgetRepository;
 
 import java.time.YearMonth;
 import java.util.ArrayList;

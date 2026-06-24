@@ -1,4 +1,4 @@
-package com.newbudget.persistence;
+package com.newbudget.data;
 
 import com.newbudget.model.CategoryType;
 import org.junit.jupiter.api.Test;
