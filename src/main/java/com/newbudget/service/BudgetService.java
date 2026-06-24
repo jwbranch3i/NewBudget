@@ -7,7 +7,9 @@ import com.newbudget.model.MonthSnapshot;
 import com.newbudget.data.BudgetRepository;
 
 import java.time.YearMonth;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -84,6 +86,70 @@ public class BudgetService {
             return;
         }
         repository.setMonthlyClassification(month, categoryId, type);
+    }
+
+    public void updateMonthlyClassificationGroup(YearMonth month, int categoryId, CategoryType targetType) {
+        if (targetType == CategoryType.INCOME) {
+            return;
+        }
+
+        repository.ensureMonthlyClassificationsFromDefaults(month);
+        List<CategoryRecord> categories = repository.getAllCategories();
+
+        Map<Integer, CategoryRecord> categoriesById = new HashMap<>();
+        Map<Integer, List<Integer>> childrenByParentId = new HashMap<>();
+        for (CategoryRecord category : categories) {
+            categoriesById.put(category.id(), category);
+            if (category.parentId() != null) {
+                childrenByParentId.computeIfAbsent(category.parentId(), ignored -> new ArrayList<>()).add(category.id());
+            }
+        }
+
+        CategoryRecord selected = categoriesById.get(categoryId);
+        if (selected == null) {
+            return;
+        }
+
+        int groupRootId = resolveGroupRootId(selected, categoriesById, childrenByParentId);
+        List<Integer> groupCategoryIds = collectSubtreeCategoryIds(groupRootId, childrenByParentId);
+
+        for (Integer id : groupCategoryIds) {
+            CategoryRecord category = categoriesById.get(id);
+            if (category != null && category.defaultType() != CategoryType.INCOME) {
+                repository.setMonthlyClassification(month, id, targetType);
+            }
+        }
+    }
+
+    private int resolveGroupRootId(
+        CategoryRecord selected,
+        Map<Integer, CategoryRecord> categoriesById,
+        Map<Integer, List<Integer>> childrenByParentId
+    ) {
+        boolean selectedHasChildren = !childrenByParentId.getOrDefault(selected.id(), Collections.emptyList()).isEmpty();
+        if (selectedHasChildren || selected.parentId() == null) {
+            return selected.id();
+        }
+
+        CategoryRecord parent = categoriesById.get(selected.parentId());
+        return parent == null ? selected.id() : parent.id();
+    }
+
+    private List<Integer> collectSubtreeCategoryIds(int rootId, Map<Integer, List<Integer>> childrenByParentId) {
+        List<Integer> ids = new ArrayList<>();
+        ArrayDeque<Integer> stack = new ArrayDeque<>();
+        stack.push(rootId);
+
+        while (!stack.isEmpty()) {
+            int current = stack.pop();
+            ids.add(current);
+            List<Integer> children = childrenByParentId.getOrDefault(current, Collections.emptyList());
+            for (int i = children.size() - 1; i >= 0; i--) {
+                stack.push(children.get(i));
+            }
+        }
+
+        return ids;
     }
 
     private Totals calculateNode(

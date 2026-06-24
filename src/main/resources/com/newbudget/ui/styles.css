@@ -1,23 +1,25 @@
 .root-pane {
-    -fx-background-color: linear-gradient(to bottom, #f7f9fc 0%, #eef2f8 100%);
+    -fx-background-color: linear-gradient(to bottom right, #f6f9ff 0%, #eef6ff 45%, #f5f8ff 100%);
 }
 
 .top-bar {
-    -fx-padding: 10 10 14 10;
-    -fx-background-color: #ffffff;
-    -fx-background-radius: 10;
-    -fx-border-color: #d8dee9;
-    -fx-border-radius: 10;
+    -fx-padding: 10;
+    -fx-background-color: rgba(255, 255, 255, 0.92);
+    -fx-background-radius: 14;
+    -fx-border-radius: 14;
+    -fx-border-color: #d8e6ff;
+    -fx-effect: dropshadow(gaussian, rgba(73, 122, 196, 0.18), 20, 0.15, 0, 4);
 }
 
 .month-label {
-    -fx-font-size: 13px;
-    -fx-font-weight: bold;
-    -fx-text-fill: #233142;
+    -fx-font-size: 14px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #1f3557;
 }
 
 .month-picker {
     -fx-min-width: 170;
+    -fx-background-radius: 10;
 }
 
 .month-nav-button,
@@ -27,17 +29,21 @@
     -fx-font-weight: 600;
     -fx-cursor: hand;
     -fx-padding: 7 12 7 12;
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+}
+
+.month-nav-button,
+.secondary-button {
+    -fx-background-color: linear-gradient(to bottom, #f7fbff 0%, #e5f0ff 100%);
+    -fx-border-color: #cde0ff;
+    -fx-text-fill: #244672;
 }
 
 .action-button {
-    -fx-background-color: #2e6fdb;
-    -fx-text-fill: white;
-}
-
-.secondary-button,
-.month-nav-button {
-    -fx-background-color: #e9edf5;
-    -fx-text-fill: #1f2937;
+    -fx-background-color: linear-gradient(to bottom, #3f85ff 0%, #2d6be6 100%);
+    -fx-border-color: #2a62d0;
+    -fx-text-fill: #ffffff;
 }
 
 .sections-root {
@@ -45,41 +51,79 @@
 }
 
 .section-card {
-    -fx-background-color: #ffffff;
-    -fx-background-radius: 10;
-    -fx-border-color: #d8dee9;
-    -fx-border-radius: 10;
+    -fx-background-color: rgba(255, 255, 255, 0.94);
+    -fx-background-radius: 16;
+    -fx-border-radius: 16;
+    -fx-border-color: #dce8ff;
+    -fx-effect: dropshadow(gaussian, rgba(34, 73, 138, 0.12), 16, 0.18, 0, 4);
 }
 
 .section-label {
-    -fx-font-size: 13px;
-    -fx-font-weight: 700;
-    -fx-text-fill: #1e293b;
-    -fx-padding: 0 0 4 2;
+    -fx-font-size: 34px;
+    -fx-font-weight: 800;
+    -fx-font-style: italic;
+    -fx-text-fill: linear-gradient(to right, #1f3b63 0%, #2c66a6 100%);
+    -fx-alignment: center;
+    -fx-max-width: infinity;
+    -fx-padding: 2 0 4 0;
 }
 
 .budget-table {
     -fx-fixed-cell-size: 28;
     -fx-font-size: 12px;
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
 }
 
 .budget-table .column-header-background {
-    -fx-background-color: #e7edf7;
+    -fx-background-color: linear-gradient(to bottom, #e8f1ff 0%, #d5e5ff 100%);
 }
 
 .budget-table .column-header,
 .budget-table .filler {
     -fx-size: 30;
-    -fx-border-color: transparent transparent #c6d0de transparent;
+    -fx-border-color: #cbdefc;
+}
+
+.budget-table .tree-table-row-cell {
+    -fx-background-color: rgba(255, 255, 255, 0.88);
+    -fx-border-color: transparent transparent #e7eefc transparent;
 }
 
 .rollup-row {
-    -fx-font-weight: bold;
-    -fx-background-color: #f7fbff;
+    -fx-font-weight: 700;
+    -fx-background-color: linear-gradient(to right, #f4f8ff 0%, #eef4ff 100%);
+}
+
+.totals-row {
+    -fx-background-color: linear-gradient(to bottom, #ecf4ff 0%, #e1ecff 100%);
+    -fx-border-color: #c9dbfb;
+}
+
+.totals-cell {
+    -fx-padding: 6 4 6 4;
+    -fx-border-color: transparent #d3e2fb transparent transparent;
+    -fx-alignment: center-right;
+    -fx-font-size: 12px;
+    -fx-text-fill: #1f3557;
+}
+
+.totals-title {
+    -fx-alignment: center-left;
+    -fx-font-weight: 700;
+}
+
+.bottom-summary {
+    -fx-padding: 12 0 0 0;
+}
+
+.selected-month-label {
+    -fx-font-size: 54px;
+    -fx-font-family: "Serif";
+    -fx-text-fill: #213f67;
 }
 
 .status-label {
-    -fx-padding: 8 2 2 2;
     -fx-font-size: 12px;
-    -fx-text-fill: #334155;
+    -fx-text-fill: #355782;
 }
