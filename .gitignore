@@ -1,0 +1,7 @@
+target/
+.idea/
+.vscode/
+*.iml
+/data/*.db
+/data/*.db-shm
+/data/*.db-wal
