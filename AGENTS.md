@@ -45,6 +45,7 @@ This file defines repository-level guidance for coding agents working on NewBudg
 - Mark parents as rollups when children exist.
 
 ## UI Rules
+- Build UI layout and control instantiation with FXML files; keep Java code focused on controller behavior and event wiring.
 - Keep three month sections: Income, Mandatory, Discretionary.
 - Budget Amt must be editable and persisted immediately.
 - Provide move actions only between Mandatory and Discretionary.

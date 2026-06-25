@@ -28,6 +28,7 @@
 - Mark parent categories as rollups when they have children.
 
 ## UI and Interaction Rules
+- Build UI layout and control instantiation with FXML files; Java code should use controllers for behavior rather than constructing the scene graph directly.
 - Keep three sections in the month view: Income, Mandatory, Discretionary.
 - Budget Amt is editable and persists immediately to SQLite.
 - Provide category move actions only between Mandatory and Discretionary.
