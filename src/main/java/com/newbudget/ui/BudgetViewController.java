@@ -175,9 +175,22 @@ public class BudgetViewController {
         this.repository = repository;
         this.budgetService = budgetService;
         this.csvActualImporter = csvActualImporter;
-        this.selectedMonth = repository.getLatestMonthWithData().orElse(YearMonth.now(ZoneId.systemDefault()));
+        YearMonth currentMonth = YearMonth.now(ZoneId.systemDefault());
+        this.selectedMonth = determineInitialMonth(currentMonth, repository.getAvailableMonths());
         refreshMonths();
         selectMonth(selectedMonth, false);
+    }
+
+    static YearMonth determineInitialMonth(YearMonth currentMonth, List<YearMonth> availableMonths) {
+        if (availableMonths.contains(currentMonth)) {
+            return currentMonth;
+        }
+
+        if (!availableMonths.isEmpty()) {
+            return availableMonths.get(availableMonths.size() - 1);
+        }
+
+        return currentMonth;
     }
 
     @FXML
