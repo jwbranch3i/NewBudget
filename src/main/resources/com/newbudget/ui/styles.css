@@ -90,6 +90,22 @@
     -fx-border-color: transparent transparent #e7eefc transparent;
 }
 
+.budget-table .tree-table-row-cell:filled:selected,
+.budget-table:focused .tree-table-row-cell:filled:selected {
+    -fx-background-color: linear-gradient(to bottom, #3f85ff 0%, #2d6be6 100%);
+    -fx-border-color: transparent transparent #2557ba transparent;
+}
+
+.budget-table .tree-table-row-cell:filled:selected .tree-table-cell,
+.budget-table:focused .tree-table-row-cell:filled:selected .tree-table-cell {
+    -fx-text-fill: #ffffff;
+}
+
+.budget-table .tree-table-row-cell:filled:selected .tree-disclosure-node,
+.budget-table:focused .tree-table-row-cell:filled:selected .tree-disclosure-node {
+    -fx-opacity: 1;
+}
+
 .rollup-row {
     -fx-font-weight: 700;
     -fx-background-color: linear-gradient(to right, #f4f8ff 0%, #eef4ff 100%);
