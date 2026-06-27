@@ -1,5 +1,6 @@
 package com.newbudget.data;
 
+import com.newbudget.model.CategoryRecord;
 import com.newbudget.model.CategoryType;
 import org.junit.jupiter.api.Test;
 
@@ -8,9 +9,11 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.YearMonth;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CsvActualImporterTest {
@@ -22,7 +25,7 @@ class CsvActualImporterTest {
         BudgetRepository repository = new BudgetRepository();
         CsvActualImporter importer = new CsvActualImporter(repository);
 
-        YearMonth imported = importer.importFile(Path.of("Mar2026.csv"));
+        YearMonth imported = importer.importFile(Path.of("rawData", "Mar2026.csv"));
 
         assertEquals(YearMonth.of(2026, 3), imported);
         assertTrue(repository.getAllCategories().stream().anyMatch(c -> c.name().equals("Fuel")));
@@ -37,7 +40,7 @@ class CsvActualImporterTest {
         BudgetRepository repository = new BudgetRepository();
         CsvActualImporter importer = new CsvActualImporter(repository);
 
-        YearMonth march = importer.importFile(Path.of("Mar2026.csv"));
+        YearMonth march = importer.importFile(Path.of("rawData", "Mar2026.csv"));
         YearMonth april = YearMonth.of(2026, 4);
         repository.ensureMonthlyClassificationsFromDefaults(april);
 
@@ -60,6 +63,31 @@ class CsvActualImporterTest {
             CategoryType.DISCRETIONARY,
             repository.getMonthlyClassifications(april).get(amazonId)
         );
+    }
+
+    @Test
+    void mayImportKeepsFuelAsLeafUnderAuto() {
+        Database.initialize();
+        resetDatabase();
+        BudgetRepository repository = new BudgetRepository();
+        CsvActualImporter importer = new CsvActualImporter(repository);
+
+        importer.importFile(Path.of("rawData", "May2026.csv"));
+
+        Map<String, CategoryRecord> categoriesByName = repository.getAllCategories().stream()
+            .collect(java.util.stream.Collectors.toMap(CategoryRecord::name, c -> c, (a, b) -> a));
+
+        CategoryRecord auto = categoriesByName.get("Auto");
+        CategoryRecord fuel = categoriesByName.get("Fuel");
+        CategoryRecord computer = categoriesByName.get("Computer");
+
+        assertNotNull(auto);
+        assertNotNull(fuel);
+        assertNotNull(computer);
+
+        assertEquals(auto.id(), fuel.parentId());
+        assertTrue(!fuel.rollup());
+        assertNull(computer.parentId());
     }
 
     private void resetDatabase() {

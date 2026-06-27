@@ -11,6 +11,18 @@
     -fx-effect: dropshadow(gaussian, rgba(73, 122, 196, 0.18), 20, 0.15, 0, 4);
 }
 
+.app-menu-bar {
+    -fx-background-color: rgba(255, 255, 255, 0.92);
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+    -fx-border-color: #d8e6ff;
+}
+
+.app-menu-bar .label {
+    -fx-text-fill: #1f3557;
+    -fx-font-weight: 600;
+}
+
 .month-label {
     -fx-font-size: 14px;
     -fx-font-weight: 700;

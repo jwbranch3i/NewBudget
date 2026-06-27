@@ -121,6 +121,14 @@ public class BudgetService {
         }
     }
 
+    public void deleteMonthData(YearMonth month) {
+        repository.deleteMonthData(month);
+    }
+
+    public void deleteAllMonthsData() {
+        repository.deleteAllMonthsData();
+    }
+
     private int resolveGroupRootId(
         CategoryRecord selected,
         Map<Integer, CategoryRecord> categoriesById,

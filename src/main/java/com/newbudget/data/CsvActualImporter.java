@@ -36,6 +36,7 @@ public class CsvActualImporter {
         repository.resetRollups();
 
         Section currentSection = Section.NONE;
+        Integer sectionBaseDepth = null;
         int sortOrder = 1;
 
         Map<Integer, String> pathByDepth = new HashMap<>();
@@ -50,12 +51,14 @@ public class CsvActualImporter {
             String categoryText = rawCategory.trim();
             if (categoryText.equalsIgnoreCase("INFLOWS")) {
                 currentSection = Section.INCOME;
+                sectionBaseDepth = null;
                 pathByDepth.clear();
                 categoryByDepth.clear();
                 continue;
             }
             if (categoryText.equalsIgnoreCase("OUTFLOWS")) {
                 currentSection = Section.OUTFLOW;
+                sectionBaseDepth = null;
                 pathByDepth.clear();
                 categoryByDepth.clear();
                 continue;
@@ -70,7 +73,11 @@ public class CsvActualImporter {
                 continue;
             }
 
-            int depth = Math.max(0, countLeadingSpaces(rawCategory) / 4);
+            int rawDepth = Math.max(0, countLeadingSpaces(rawCategory) / 4);
+            if (sectionBaseDepth == null || rawDepth < sectionBaseDepth) {
+                sectionBaseDepth = rawDepth;
+            }
+            int depth = Math.max(0, rawDepth - sectionBaseDepth);
             String parentPath = depth == 0 ? null : pathByDepth.get(depth - 1);
             Integer parentId = depth == 0 ? null : categoryByDepth.get(depth - 1);
 

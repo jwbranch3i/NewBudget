@@ -10,6 +10,8 @@ import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonBar;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
@@ -32,13 +34,14 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.ToDoubleFunction;
 
 public class BudgetViewController {
     private static final DateTimeFormatter MONTH_DISPLAY = DateTimeFormatter.ofPattern("MMMM yyyy");
-    private static final double CATEGORY_COL_WIDTH = 290;
-    private static final double MONEY_COL_WIDTH = 110;
+    private static final double CATEGORY_COL_WIDTH = 200;  //290;
+    private static final double MONEY_COL_WIDTH = 75;  //110;
     private static final String ROLLUP_ROW_CLASS = "rollup-row";
     private static final String ZERO_MONEY = "$0.00";
 
@@ -195,12 +198,45 @@ public class BudgetViewController {
 
     @FXML
     private void onPreviousMonth() {
-        selectMonth(selectedMonth.minusMonths(1), true);
+        if (selectedMonth == null) {
+            showInfo("No Month Selected", "There is no selected month.");
+            return;
+        }
+
+        List<YearMonth> months = repository.getAvailableMonths();
+        YearMonth previous = null;
+        for (YearMonth m : months) {
+            if (m.isBefore(selectedMonth)) {
+                previous = m;
+            }
+        }
+        if (previous != null) {
+            selectMonth(previous, false);
+        } else {
+            showInfo("No Earlier Month", "There is no earlier month with data.");
+        }
     }
 
     @FXML
     private void onNextMonth() {
-        selectMonth(selectedMonth.plusMonths(1), true);
+        if (selectedMonth == null) {
+            showInfo("No Month Selected", "There is no selected month.");
+            return;
+        }
+
+        List<YearMonth> months = repository.getAvailableMonths();
+        YearMonth next = null;
+        for (YearMonth m : months) {
+            if (m.isAfter(selectedMonth)) {
+                next = m;
+                break;
+            }
+        }
+        if (next != null) {
+            selectMonth(next, false);
+        } else {
+            showInfo("No Later Month", "There is no later month with data.");
+        }
     }
 
     @FXML
@@ -226,6 +262,67 @@ public class BudgetViewController {
             statusLabel.setText("Imported " + file.getName() + " for " + MONTH_DISPLAY.format(importedMonth));
         } catch (Exception ex) {
             showError("Import failed", ex.getMessage());
+        }
+    }
+
+    @FXML
+    private void onDeleteCurrentMonthData() {
+        if (selectedMonth == null) {
+            showInfo("No Month Selected", "There is no selected month to delete.");
+            return;
+        }
+
+        String monthName = MONTH_DISPLAY.format(selectedMonth);
+        boolean confirmed = confirmAction(
+            "Delete Current Month Data",
+            "Delete all data for " + monthName + "?",
+            "This removes budgets, actuals, and month-specific classifications for this month.",
+            "Delete Month"
+        );
+        if (!confirmed) {
+            statusLabel.setText("Delete canceled");
+            return;
+        }
+
+        try {
+            budgetService.deleteMonthData(selectedMonth);
+            selectMonth(selectedMonth, false);
+            statusLabel.setText("Deleted all data for " + monthName);
+        } catch (Exception ex) {
+            showError("Delete failed", ex.getMessage());
+        }
+    }
+
+    @FXML
+    private void onDeleteAllMonthsData() {
+        boolean firstConfirmation = confirmAction(
+            "Delete All Months Data",
+            "Delete all data for every month?",
+            "This cannot be undone and removes budgets, actuals, and monthly classifications from all months.",
+            "Continue"
+        );
+        if (!firstConfirmation) {
+            statusLabel.setText("Delete canceled");
+            return;
+        }
+
+        boolean secondConfirmation = confirmAction(
+            "Final Confirmation",
+            "Are you absolutely sure?",
+            "Choose Delete All only if you really intend to clear every month.",
+            "Delete All"
+        );
+        if (!secondConfirmation) {
+            statusLabel.setText("Delete canceled");
+            return;
+        }
+
+        try {
+            budgetService.deleteAllMonthsData();
+            selectMonth(YearMonth.now(ZoneId.systemDefault()), false);
+            statusLabel.setText("Deleted all month data");
+        } catch (Exception ex) {
+            showError("Delete failed", ex.getMessage());
         }
     }
 
@@ -464,8 +561,15 @@ public class BudgetViewController {
     private void refreshMonths() {
         List<YearMonth> months = repository.getAvailableMonths();
         if (months.isEmpty()) {
-            repository.ensureMonthlyClassificationsFromDefaults(selectedMonth);
-            months = repository.getAvailableMonths();
+            selectedMonth = null;
+            updatingMonthPicker = true;
+            try {
+                monthPicker.setItems(FXCollections.observableArrayList());
+                monthPicker.setValue(null);
+            } finally {
+                updatingMonthPicker = false;
+            }
+            return;
         }
 
         YearMonth monthToShow = selectedMonth;
@@ -517,7 +621,23 @@ public class BudgetViewController {
             repository.ensureMonthlyClassificationsFromDefaults(month);
         }
         refreshMonths();
-        loadMonth(month);
+        if (selectedMonth == null) {
+            clearVisibleData();
+            selectedMonthLabel.setText(month == null ? "" : MONTH_DISPLAY.format(month));
+            statusLabel.setText("No month data available");
+            return;
+        }
+        loadMonth(selectedMonth);
+    }
+
+    private void clearVisibleData() {
+        incomeTable.setRoot(new TreeItem<>());
+        mandatoryTable.setRoot(new TreeItem<>());
+        discretionaryTable.setRoot(new TreeItem<>());
+        incomeTable.refresh();
+        mandatoryTable.refresh();
+        discretionaryTable.refresh();
+        initializeTotals();
     }
 
     private void showError(String title, String message) {
@@ -526,5 +646,27 @@ public class BudgetViewController {
         alert.setHeaderText(title);
         alert.setContentText(message);
         alert.showAndWait();
+    }
+
+    private void showInfo(String title, String message) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle(title);
+        alert.setHeaderText(title);
+        alert.setContentText(message);
+        alert.showAndWait();
+    }
+
+    private boolean confirmAction(String title, String header, String message, String confirmText) {
+        ButtonType confirmButton = new ButtonType(confirmText, ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelButton = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle(title);
+        alert.setHeaderText(header);
+        alert.setContentText(message);
+        alert.getButtonTypes().setAll(confirmButton, cancelButton);
+
+        Optional<ButtonType> result = alert.showAndWait();
+        return result.isPresent() && result.get() == confirmButton;
     }
 }

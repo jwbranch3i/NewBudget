@@ -92,6 +92,47 @@ public class BudgetRepository {
         }
     }
 
+    public void deleteMonthData(YearMonth month) {
+        String monthKey = toMonthKey(month);
+        try (Connection connection = Database.getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                executeMonthDelete(connection, "DELETE FROM monthly_actuals WHERE month = ?", monthKey);
+                executeMonthDelete(connection, "DELETE FROM monthly_budgets WHERE month = ?", monthKey);
+                executeMonthDelete(connection, "DELETE FROM monthly_classifications WHERE month = ?", monthKey);
+                removeOrphanCategories(connection);
+                connection.commit();
+            } catch (SQLException e) {
+                connection.rollback();
+                throw e;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to delete month data", e);
+        }
+    }
+
+    public void deleteAllMonthsData() {
+        try (Connection connection = Database.getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                executeDelete(connection, "DELETE FROM monthly_actuals");
+                executeDelete(connection, "DELETE FROM monthly_budgets");
+                executeDelete(connection, "DELETE FROM monthly_classifications");
+                removeOrphanCategories(connection);
+                connection.commit();
+            } catch (SQLException e) {
+                connection.rollback();
+                throw e;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to delete all month data", e);
+        }
+    }
+
     public void upsertMonthlyActual(YearMonth month, int categoryId, double amount) {
         String sql = """
             INSERT INTO monthly_actuals(month, category_id, actual_amount)
@@ -392,6 +433,42 @@ public class BudgetRepository {
             throw new IllegalStateException("Failed to load monthly values", e);
         }
         return values;
+    }
+
+    private void executeMonthDelete(Connection connection, String sql, String monthKey) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, monthKey);
+            statement.executeUpdate();
+        }
+    }
+
+    private void executeDelete(Connection connection, String sql) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.executeUpdate();
+        }
+    }
+
+    private void removeOrphanCategories(Connection connection) throws SQLException {
+        String deleteOrphansSql = """
+            DELETE FROM categories
+            WHERE id NOT IN (
+                SELECT category_id FROM monthly_actuals
+                UNION
+                SELECT category_id FROM monthly_budgets
+                UNION
+                SELECT category_id FROM monthly_classifications
+            )
+              AND id NOT IN (
+                SELECT DISTINCT parent_id FROM categories WHERE parent_id IS NOT NULL
+            )
+            """;
+
+        int deleted;
+        do {
+            try (PreparedStatement statement = connection.prepareStatement(deleteOrphansSql)) {
+                deleted = statement.executeUpdate();
+            }
+        } while (deleted > 0);
     }
 
     public static String toMonthKey(YearMonth month) {
