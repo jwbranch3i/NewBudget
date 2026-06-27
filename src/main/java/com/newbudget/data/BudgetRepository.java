@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 
 public class BudgetRepository {
     private static final DateTimeFormatter MONTH_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM");
@@ -100,6 +101,7 @@ public class BudgetRepository {
                 executeMonthDelete(connection, "DELETE FROM monthly_actuals WHERE month = ?", monthKey);
                 executeMonthDelete(connection, "DELETE FROM monthly_budgets WHERE month = ?", monthKey);
                 executeMonthDelete(connection, "DELETE FROM monthly_classifications WHERE month = ?", monthKey);
+                executeMonthDelete(connection, "DELETE FROM monthly_balance_overrides WHERE month = ?", monthKey);
                 removeOrphanCategories(connection);
                 connection.commit();
             } catch (SQLException e) {
@@ -120,6 +122,7 @@ public class BudgetRepository {
                 executeDelete(connection, "DELETE FROM monthly_actuals");
                 executeDelete(connection, "DELETE FROM monthly_budgets");
                 executeDelete(connection, "DELETE FROM monthly_classifications");
+                executeDelete(connection, "DELETE FROM monthly_balance_overrides");
                 removeOrphanCategories(connection);
                 connection.commit();
             } catch (SQLException e) {
@@ -184,6 +187,24 @@ public class BudgetRepository {
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to set monthly classification", e);
+        }
+    }
+
+    public void upsertMonthlyBalanceOverride(YearMonth month, int categoryId, double amount) {
+        String sql = """
+            INSERT INTO monthly_balance_overrides(month, category_id, balance_amount)
+            VALUES (?, ?, ?)
+            ON CONFLICT(month, category_id)
+            DO UPDATE SET balance_amount = excluded.balance_amount
+            """;
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, toMonthKey(month));
+            statement.setInt(2, categoryId);
+            statement.setDouble(3, amount);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to upsert monthly balance override", e);
         }
     }
 
@@ -262,6 +283,25 @@ public class BudgetRepository {
         );
     }
 
+    public Map<Integer, Map<YearMonth, Double>> getMonthlyBudgetAmountsUpTo(YearMonth month) {
+        return readMonthlyAmountsUpTo("monthly_budgets", "budget_amount", month);
+    }
+
+    public Map<Integer, Map<YearMonth, Double>> getMonthlyActualAmountsUpTo(YearMonth month) {
+        return readMonthlyAmountsUpTo("monthly_actuals", "actual_amount", month);
+    }
+
+    public Map<Integer, Double> getMonthlyBalanceOverrides(YearMonth month) {
+        return readAmountMap(
+            "SELECT category_id, balance_amount AS amount FROM monthly_balance_overrides WHERE month = ?",
+            toMonthKey(month)
+        );
+    }
+
+    public Map<Integer, Map<YearMonth, Double>> getMonthlyBalanceOverridesUpTo(YearMonth month) {
+        return readMonthlyAmountsUpTo("monthly_balance_overrides", "balance_amount", month);
+    }
+
     public Map<Integer, Double> getCumulativeBudgetMinusActual(YearMonth month) {
         String sql = """
             SELECT c.id AS category_id,
@@ -316,6 +356,8 @@ public class BudgetRepository {
                 SELECT month FROM monthly_budgets
                 UNION
                 SELECT month FROM monthly_classifications
+                UNION
+                SELECT month FROM monthly_balance_overrides
             )
             """;
         try (Connection connection = Database.getConnection();
@@ -339,6 +381,8 @@ public class BudgetRepository {
                 SELECT DISTINCT month FROM monthly_budgets
                 UNION
                 SELECT DISTINCT month FROM monthly_classifications
+                UNION
+                SELECT DISTINCT month FROM monthly_balance_overrides
             )
             ORDER BY month
             """;
@@ -435,6 +479,26 @@ public class BudgetRepository {
         return values;
     }
 
+    private Map<Integer, Map<YearMonth, Double>> readMonthlyAmountsUpTo(String table, String amountColumn, YearMonth month) {
+        String sql = "SELECT category_id, month, " + amountColumn + " AS amount FROM " + table + " WHERE month <= ?";
+        Map<Integer, Map<YearMonth, Double>> values = new HashMap<>();
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, toMonthKey(month));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    int categoryId = resultSet.getInt("category_id");
+                    YearMonth entryMonth = YearMonth.parse(resultSet.getString("month"), MONTH_FORMAT);
+                    values.computeIfAbsent(categoryId, ignored -> new TreeMap<>())
+                        .put(entryMonth, resultSet.getDouble("amount"));
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to load monthly values through month " + month, e);
+        }
+        return values;
+    }
+
     private void executeMonthDelete(Connection connection, String sql, String monthKey) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, monthKey);
@@ -457,6 +521,8 @@ public class BudgetRepository {
                 SELECT category_id FROM monthly_budgets
                 UNION
                 SELECT category_id FROM monthly_classifications
+                UNION
+                SELECT category_id FROM monthly_balance_overrides
             )
               AND id NOT IN (
                 SELECT DISTINCT parent_id FROM categories WHERE parent_id IS NOT NULL

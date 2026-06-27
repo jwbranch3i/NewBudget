@@ -64,6 +64,10 @@ public class BudgetTableRow {
         return balance.get();
     }
 
+    public void setBalance(double value) {
+        balance.set(value);
+    }
+
     public CategoryType getType() {
         return type;
     }
@@ -74,5 +78,9 @@ public class BudgetTableRow {
 
     public DoubleProperty budgetAmountProperty() {
         return budgetAmount;
+    }
+
+    public DoubleProperty balanceProperty() {
+        return balance;
     }
 }

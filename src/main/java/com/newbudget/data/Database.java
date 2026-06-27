@@ -66,6 +66,16 @@ public final class Database {
                     FOREIGN KEY(category_id) REFERENCES categories(id) ON DELETE CASCADE
                 )
                 """);
+
+            statement.execute("""
+                CREATE TABLE IF NOT EXISTS monthly_balance_overrides (
+                    month TEXT NOT NULL,
+                    category_id INTEGER NOT NULL,
+                    balance_amount REAL NOT NULL,
+                    PRIMARY KEY(month, category_id),
+                    FOREIGN KEY(category_id) REFERENCES categories(id) ON DELETE CASCADE
+                )
+                """);
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to initialize database", e);
         }

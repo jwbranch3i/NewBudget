@@ -2,6 +2,7 @@ package com.newbudget.service;
 
 import com.newbudget.data.BudgetRepository;
 import com.newbudget.data.Database;
+import com.newbudget.model.BudgetLine;
 import com.newbudget.model.CategoryType;
 import org.junit.jupiter.api.Test;
 
@@ -92,12 +93,14 @@ class BudgetServiceTest {
         repository.upsertMonthlyActual(month, categoryId, 100.0);
         repository.upsertMonthlyBudget(month, categoryId, 125.0);
         repository.setMonthlyClassification(month, categoryId, CategoryType.DISCRETIONARY);
+        repository.upsertMonthlyBalanceOverride(month, categoryId, 55.0);
 
         service.deleteMonthData(month);
 
         assertTrue(repository.getMonthlyActuals(month).isEmpty());
         assertTrue(repository.getMonthlyBudgets(month).isEmpty());
         assertTrue(repository.getMonthlyClassifications(month).isEmpty());
+        assertTrue(repository.getMonthlyBalanceOverrides(month).isEmpty());
         assertFalse(repository.getAvailableMonths().contains(month));
         assertTrue(repository.getAllCategories().isEmpty());
     }
@@ -115,14 +118,128 @@ class BudgetServiceTest {
         repository.upsertMonthlyActual(month, categoryId, 1400.0);
         repository.upsertMonthlyBudget(month, categoryId, 1500.0);
         repository.setMonthlyClassification(month, categoryId, CategoryType.MANDATORY);
+        repository.upsertMonthlyBalanceOverride(month, categoryId, 250.0);
 
         service.deleteAllMonthsData();
 
         assertTrue(repository.getMonthlyActuals(month).isEmpty());
         assertTrue(repository.getMonthlyBudgets(month).isEmpty());
         assertTrue(repository.getMonthlyClassifications(month).isEmpty());
+        assertTrue(repository.getMonthlyBalanceOverrides(month).isEmpty());
         assertTrue(repository.getAvailableMonths().isEmpty());
         assertTrue(repository.getAllCategories().isEmpty());
+    }
+
+    @Test
+    void monthBalanceOverrideIsUsedAndCarriesForwardToFutureMonths() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int categoryId = repository.findOrCreateCategory("Fuel", "Fuel", null, 1, CategoryType.MANDATORY);
+
+        YearMonth january = YearMonth.of(2026, Month.JANUARY);
+        YearMonth february = YearMonth.of(2026, Month.FEBRUARY);
+        YearMonth march = YearMonth.of(2026, Month.MARCH);
+
+        repository.upsertMonthlyBudget(january, categoryId, 100.0);
+        repository.upsertMonthlyActual(january, categoryId, 90.0);
+
+        repository.upsertMonthlyBudget(february, categoryId, 120.0);
+        repository.upsertMonthlyActual(february, categoryId, 100.0);
+
+        service.updateBalance(february, categoryId, 500.0);
+
+        repository.upsertMonthlyBudget(march, categoryId, 80.0);
+        repository.upsertMonthlyActual(march, categoryId, 30.0);
+
+        double februaryBalance = findLine(service.loadMonth(february).mandatory(), categoryId).balance();
+        double marchBalance = findLine(service.loadMonth(march).mandatory(), categoryId).balance();
+
+        assertEquals(500.0, februaryBalance);
+        assertEquals(550.0, marchBalance);
+    }
+
+    @Test
+    void parentBalanceIsSumOfLeafBalancesOnlyForSelectedMonth() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int parentId = repository.findOrCreateCategory("Auto", "Auto", null, 1, CategoryType.MANDATORY);
+        int fuelId = repository.findOrCreateCategory("Fuel", "Auto/Fuel", parentId, 2, CategoryType.MANDATORY);
+        int maintenanceId = repository.findOrCreateCategory(
+            "Maintenance",
+            "Auto/Maintenance",
+            parentId,
+            3,
+            CategoryType.MANDATORY
+        );
+
+        YearMonth january = YearMonth.of(2026, Month.JANUARY);
+        YearMonth february = YearMonth.of(2026, Month.FEBRUARY);
+
+        repository.upsertMonthlyBudget(january, fuelId, 100.0);
+        repository.upsertMonthlyActual(january, fuelId, 60.0);
+        repository.upsertMonthlyBudget(january, maintenanceId, 80.0);
+        repository.upsertMonthlyActual(january, maintenanceId, 70.0);
+
+        service.updateBalance(january, parentId, 999.0);
+
+        repository.upsertMonthlyBudget(february, fuelId, 120.0);
+        repository.upsertMonthlyActual(february, fuelId, 100.0);
+        service.updateBalance(february, maintenanceId, 500.0);
+
+        double fuelBalance = findLine(service.loadMonth(february).mandatory(), fuelId).balance();
+        double maintenanceBalance = findLine(service.loadMonth(february).mandatory(), maintenanceId).balance();
+        double parentBalance = findLine(service.loadMonth(february).mandatory(), parentId).balance();
+
+        assertEquals(60.0, fuelBalance);
+        assertEquals(500.0, maintenanceBalance);
+        assertEquals(560.0, parentBalance);
+    }
+
+    @Test
+    void rollupWithoutChildrenBehavesLikeLeafForBalanceCarryAndOverride() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int categoryId = repository.findOrCreateCategory("Auto", "Auto", null, 1, CategoryType.MANDATORY);
+        repository.markRollup(categoryId);
+
+        YearMonth january = YearMonth.of(2026, Month.JANUARY);
+        YearMonth february = YearMonth.of(2026, Month.FEBRUARY);
+        YearMonth march = YearMonth.of(2026, Month.MARCH);
+
+        repository.upsertMonthlyBudget(january, categoryId, 200.0);
+        repository.upsertMonthlyActual(january, categoryId, 50.0);
+
+        service.updateBalance(february, categoryId, 300.0);
+
+        repository.upsertMonthlyBudget(march, categoryId, 100.0);
+        repository.upsertMonthlyActual(march, categoryId, 60.0);
+
+        double januaryBalance = findLine(service.loadMonth(january).mandatory(), categoryId).balance();
+        double februaryBalance = findLine(service.loadMonth(february).mandatory(), categoryId).balance();
+        double marchBalance = findLine(service.loadMonth(march).mandatory(), categoryId).balance();
+
+        assertEquals(150.0, januaryBalance);
+        assertEquals(300.0, februaryBalance);
+        assertEquals(340.0, marchBalance);
+    }
+
+    private BudgetLine findLine(java.util.List<BudgetLine> lines, int categoryId) {
+        return lines.stream()
+            .filter(line -> line.categoryId() == categoryId)
+            .findFirst()
+            .orElseThrow(() -> new IllegalStateException("Category not found in snapshot: " + categoryId));
     }
 
     private void resetDatabase() {
@@ -130,6 +247,7 @@ class BudgetServiceTest {
             statement.execute("DELETE FROM monthly_classifications");
             statement.execute("DELETE FROM monthly_budgets");
             statement.execute("DELETE FROM monthly_actuals");
+            statement.execute("DELETE FROM monthly_balance_overrides");
             statement.execute("DELETE FROM categories");
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to reset test database", e);

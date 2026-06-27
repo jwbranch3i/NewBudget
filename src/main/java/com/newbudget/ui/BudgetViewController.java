@@ -353,13 +353,13 @@ public class BudgetViewController {
 
         configureCategoryColumn(categoryColumn);
         configureMoneyColumn(actualColumn, BudgetTableRow::getActualAmount, money);
-        configureBudgetColumn(table, budgetColumn, money);
+        configureBudgetColumn(budgetColumn, money);
         configureMoneyColumn(
             differenceColumn,
             row -> row.isRollup() ? row.getBudgetAmount() - row.getActualAmount() : row.getDifference(),
             money
         );
-        configureMoneyColumn(balanceColumn, BudgetTableRow::getBalance, money);
+        configureBalanceColumn(balanceColumn, money);
         table.setRowFactory(tv -> createRow(moveAction, allowMove));
     }
 
@@ -376,11 +376,7 @@ public class BudgetViewController {
         column.setPrefWidth(CATEGORY_COL_WIDTH);
     }
 
-    private void configureBudgetColumn(
-        TreeTableView<BudgetTableRow> table,
-        TreeTableColumn<BudgetTableRow, Number> column,
-        NumberFormat money
-    ) {
+    private void configureBudgetColumn(TreeTableColumn<BudgetTableRow, Number> column, NumberFormat money) {
         column.setCellValueFactory(cell -> cell.getValue().getValue().budgetAmountProperty());
         column.setCellFactory(col -> new TextFieldTreeTableCell<>(new StringConverter<>() {
             @Override
@@ -423,6 +419,52 @@ public class BudgetViewController {
 
         BudgetTableRow row = treeItem.getValue();
         budgetService.updateBudget(selectedMonth, row.getCategoryId(), newValue.doubleValue());
+        loadMonth(selectedMonth);
+    }
+
+    private void configureBalanceColumn(TreeTableColumn<BudgetTableRow, Number> column, NumberFormat money) {
+        column.setCellValueFactory(cell -> cell.getValue().getValue().balanceProperty());
+        column.setCellFactory(col -> new TextFieldTreeTableCell<>(new StringConverter<>() {
+            @Override
+            public String toString(Number object) {
+                return money.format(object.doubleValue());
+            }
+
+            @Override
+            public Number fromString(String string) {
+                String normalized = string.replace("$", "").replace(",", "").trim();
+                if (normalized.isBlank()) {
+                    return 0.0;
+                }
+                return Double.parseDouble(normalized);
+            }
+        }) {
+            @Override
+            public void startEdit() {
+                TreeTableView<BudgetTableRow> treeTable = getTreeTableView();
+                if (treeTable == null) {
+                    return;
+                }
+
+                TreeItem<BudgetTableRow> treeItem = treeTable.getTreeItem(getIndex());
+                if (treeItem == null || treeItem.getValue() == null || !treeItem.getChildren().isEmpty()) {
+                    return;
+                }
+
+                super.startEdit();
+            }
+        });
+        column.setOnEditCommit(event -> onBalanceEdited(event.getRowValue(), event.getNewValue()));
+        column.setPrefWidth(MONEY_COL_WIDTH);
+    }
+
+    private void onBalanceEdited(TreeItem<BudgetTableRow> treeItem, Number newValue) {
+        if (treeItem == null || treeItem.getValue() == null || !treeItem.getChildren().isEmpty()) {
+            return;
+        }
+
+        BudgetTableRow row = treeItem.getValue();
+        budgetService.updateBalance(selectedMonth, row.getCategoryId(), newValue.doubleValue());
         loadMonth(selectedMonth);
     }
 
