@@ -19,6 +19,7 @@ public class BudgetTableRow {
     private final DoubleProperty balance;
     private final CategoryType type;
     private final boolean rollup;
+    private final boolean hidden;
 
     public BudgetTableRow(BudgetLine line) {
         this.categoryId = new SimpleIntegerProperty(line.categoryId());
@@ -30,6 +31,7 @@ public class BudgetTableRow {
         this.balance = new SimpleDoubleProperty(line.balance());
         this.type = line.type();
         this.rollup = line.rollup();
+        this.hidden = line.hidden();
     }
 
     public int getCategoryId() {
@@ -74,6 +76,10 @@ public class BudgetTableRow {
 
     public boolean isRollup() {
         return rollup;
+    }
+
+    public boolean isHidden() {
+        return hidden;
     }
 
     public DoubleProperty budgetAmountProperty() {

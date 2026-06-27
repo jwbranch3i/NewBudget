@@ -34,6 +34,12 @@
     -fx-background-radius: 10;
 }
 
+.show-hidden-toggle {
+    -fx-text-fill: #244672;
+    -fx-font-weight: 600;
+    -fx-padding: 4 6 4 6;
+}
+
 .month-nav-button,
 .action-button,
 .secondary-button {
@@ -121,6 +127,22 @@
 .rollup-row {
     -fx-font-weight: 700;
     -fx-background-color: linear-gradient(to right, #f4f8ff 0%, #eef4ff 100%);
+}
+
+.budget-table .tree-table-row-cell.hidden-row {
+    -fx-background-color: linear-gradient(to right, #ececec 0%, #dddddd 100%);
+    -fx-border-color: transparent transparent #d2d2d2 transparent;
+}
+
+.budget-table .tree-table-row-cell.hidden-row .tree-table-cell {
+    -fx-text-fill: #5f5f5f;
+    -fx-font-style: italic;
+}
+
+.budget-table .tree-table-row-cell.hidden-row:filled:selected,
+.budget-table:focused .tree-table-row-cell.hidden-row:filled:selected {
+    -fx-background-color: linear-gradient(to bottom, #6f83a8 0%, #5a6f96 100%);
+    -fx-border-color: transparent transparent #4d6187 transparent;
 }
 
 .totals-row {

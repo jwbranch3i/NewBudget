@@ -11,9 +11,11 @@ import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 
 public class BudgetRepository {
@@ -102,6 +104,7 @@ public class BudgetRepository {
                 executeMonthDelete(connection, "DELETE FROM monthly_budgets WHERE month = ?", monthKey);
                 executeMonthDelete(connection, "DELETE FROM monthly_classifications WHERE month = ?", monthKey);
                 executeMonthDelete(connection, "DELETE FROM monthly_balance_overrides WHERE month = ?", monthKey);
+                executeMonthDelete(connection, "DELETE FROM monthly_hidden_categories WHERE month = ?", monthKey);
                 removeOrphanCategories(connection);
                 connection.commit();
             } catch (SQLException e) {
@@ -123,6 +126,7 @@ public class BudgetRepository {
                 executeDelete(connection, "DELETE FROM monthly_budgets");
                 executeDelete(connection, "DELETE FROM monthly_classifications");
                 executeDelete(connection, "DELETE FROM monthly_balance_overrides");
+                executeDelete(connection, "DELETE FROM monthly_hidden_categories");
                 removeOrphanCategories(connection);
                 connection.commit();
             } catch (SQLException e) {
@@ -208,6 +212,35 @@ public class BudgetRepository {
         }
     }
 
+    public void setMonthlyHidden(YearMonth month, int categoryId, boolean hidden) {
+        if (hidden) {
+            String sql = """
+                INSERT INTO monthly_hidden_categories(month, category_id)
+                VALUES (?, ?)
+                ON CONFLICT(month, category_id) DO NOTHING
+                """;
+            try (Connection connection = Database.getConnection();
+                 PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setString(1, toMonthKey(month));
+                statement.setInt(2, categoryId);
+                statement.executeUpdate();
+            } catch (SQLException e) {
+                throw new IllegalStateException("Failed to set hidden category", e);
+            }
+            return;
+        }
+
+        String sql = "DELETE FROM monthly_hidden_categories WHERE month = ? AND category_id = ?";
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, toMonthKey(month));
+            statement.setInt(2, categoryId);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to clear hidden category", e);
+        }
+    }
+
     public void ensureMonthlyClassificationsFromDefaults(YearMonth month) {
         String monthKey = toMonthKey(month);
         String sql = """
@@ -260,7 +293,8 @@ public class BudgetRepository {
                     parentId,
                     resultSet.getInt("sort_order"),
                     CategoryType.fromDb(resultSet.getString("default_type")),
-                    resultSet.getInt("is_rollup") == 1
+                    resultSet.getInt("is_rollup") == 1,
+                    false
                 ));
             }
         } catch (SQLException e) {
@@ -348,6 +382,23 @@ public class BudgetRepository {
         return values;
     }
 
+    public Set<Integer> getMonthlyHiddenCategoryIds(YearMonth month) {
+        String sql = "SELECT category_id FROM monthly_hidden_categories WHERE month = ?";
+        Set<Integer> values = new HashSet<>();
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, toMonthKey(month));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    values.add(resultSet.getInt("category_id"));
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to load monthly hidden categories", e);
+        }
+        return values;
+    }
+
     public Optional<YearMonth> getLatestMonthWithData() {
         String sql = """
             SELECT MAX(month) AS month FROM (
@@ -358,6 +409,8 @@ public class BudgetRepository {
                 SELECT month FROM monthly_classifications
                 UNION
                 SELECT month FROM monthly_balance_overrides
+                UNION
+                SELECT month FROM monthly_hidden_categories
             )
             """;
         try (Connection connection = Database.getConnection();
@@ -383,6 +436,8 @@ public class BudgetRepository {
                 SELECT DISTINCT month FROM monthly_classifications
                 UNION
                 SELECT DISTINCT month FROM monthly_balance_overrides
+                UNION
+                SELECT DISTINCT month FROM monthly_hidden_categories
             )
             ORDER BY month
             """;
@@ -523,6 +578,8 @@ public class BudgetRepository {
                 SELECT category_id FROM monthly_classifications
                 UNION
                 SELECT category_id FROM monthly_balance_overrides
+                                UNION
+                                SELECT category_id FROM monthly_hidden_categories
             )
               AND id NOT IN (
                 SELECT DISTINCT parent_id FROM categories WHERE parent_id IS NOT NULL

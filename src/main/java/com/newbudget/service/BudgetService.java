@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Set;
 import java.util.TreeSet;
 
 public class BudgetService {
@@ -25,6 +26,10 @@ public class BudgetService {
     }
 
     public MonthSnapshot loadMonth(YearMonth month) {
+        return loadMonth(month, true);
+    }
+
+    public MonthSnapshot loadMonth(YearMonth month, boolean includeHidden) {
         repository.ensureMonthlyClassificationsFromDefaults(month);
 
         List<CategoryRecord> categories = repository.getAllCategories();
@@ -32,11 +37,13 @@ public class BudgetService {
         Map<Integer, Double> monthlyBudgets = repository.getMonthlyBudgets(month);
         Map<Integer, Double> effectiveBalances = computeEffectiveBalances(month);
         Map<Integer, CategoryType> monthlyTypes = repository.getMonthlyClassifications(month);
+        Set<Integer> hiddenCategoryIds = repository.getMonthlyHiddenCategoryIds(month);
 
         Map<Integer, Node> nodesById = new HashMap<>();
         for (CategoryRecord category : categories) {
             CategoryType effectiveType = monthlyTypes.getOrDefault(category.id(), category.defaultType());
-            nodesById.put(category.id(), new Node(category, effectiveType));
+            boolean hidden = hiddenCategoryIds.contains(category.id());
+            nodesById.put(category.id(), new Node(category, effectiveType, hidden));
         }
 
         List<Node> roots = new ArrayList<>();
@@ -59,7 +66,7 @@ public class BudgetService {
         }
 
         for (Node root : roots) {
-            calculateNode(root, monthlyActuals, monthlyBudgets, effectiveBalances);
+            calculateNode(root, monthlyActuals, monthlyBudgets, effectiveBalances, includeHidden);
         }
 
         List<BudgetLine> incomeLines = new ArrayList<>();
@@ -67,9 +74,9 @@ public class BudgetService {
         List<BudgetLine> discretionaryLines = new ArrayList<>();
 
         for (Node root : roots) {
-            collectLines(root, 0, CategoryType.INCOME, incomeLines);
-            collectLines(root, 0, CategoryType.MANDATORY, mandatoryLines);
-            collectLines(root, 0, CategoryType.DISCRETIONARY, discretionaryLines);
+            collectLines(root, 0, CategoryType.INCOME, incomeLines, includeHidden);
+            collectLines(root, 0, CategoryType.MANDATORY, mandatoryLines, includeHidden);
+            collectLines(root, 0, CategoryType.DISCRETIONARY, discretionaryLines, includeHidden);
         }
 
         return new MonthSnapshot(month, incomeLines, mandatoryLines, discretionaryLines);
@@ -127,6 +134,20 @@ public class BudgetService {
         }
     }
 
+    public void updateCategoryHiddenState(YearMonth month, int categoryId, boolean hidden) {
+        List<CategoryRecord> categories = repository.getAllCategories();
+        Map<Integer, List<Integer>> childrenByParentId = new HashMap<>();
+        for (CategoryRecord category : categories) {
+            if (category.parentId() != null) {
+                childrenByParentId.computeIfAbsent(category.parentId(), ignored -> new ArrayList<>()).add(category.id());
+            }
+        }
+
+        for (Integer id : collectSubtreeCategoryIds(categoryId, childrenByParentId)) {
+            repository.setMonthlyHidden(month, id, hidden);
+        }
+    }
+
     public void deleteMonthData(YearMonth month) {
         repository.deleteMonthData(month);
     }
@@ -170,15 +191,24 @@ public class BudgetService {
         Node node,
         Map<Integer, Double> monthlyActuals,
         Map<Integer, Double> monthlyBudgets,
-        Map<Integer, Double> effectiveBalances
+        Map<Integer, Double> effectiveBalances,
+        boolean includeHidden
     ) {
+        if (!includeHidden && node.hidden) {
+            node.actual = 0.0;
+            node.budget = 0.0;
+            node.difference = 0.0;
+            node.balance = 0.0;
+            return new Totals(0.0, 0.0, 0.0);
+        }
+
         double actual = monthlyActuals.getOrDefault(node.category.id(), 0.0);
         double budget = monthlyBudgets.getOrDefault(node.category.id(), 0.0);
         double ownBalance = effectiveBalances.getOrDefault(node.category.id(), 0.0);
         double childBalance = 0.0;
 
         for (Node child : node.children) {
-            Totals childTotals = calculateNode(child, monthlyActuals, monthlyBudgets, effectiveBalances);
+            Totals childTotals = calculateNode(child, monthlyActuals, monthlyBudgets, effectiveBalances, includeHidden);
             actual += childTotals.actual;
             budget += childTotals.budget;
             childBalance += childTotals.balance;
@@ -251,7 +281,11 @@ public class BudgetService {
         return new java.util.TreeMap<>(values);
     }
 
-    private void collectLines(Node node, int depth, CategoryType targetType, List<BudgetLine> out) {
+    private void collectLines(Node node, int depth, CategoryType targetType, List<BudgetLine> out, boolean includeHidden) {
+        if (!includeHidden && node.hidden) {
+            return;
+        }
+
         if (node.type == targetType) {
             out.add(new BudgetLine(
                 node.category.id(),
@@ -262,27 +296,30 @@ public class BudgetService {
                 node.difference,
                 node.balance,
                 node.type,
-                node.category.rollup() || !node.children.isEmpty()
+                node.category.rollup() || !node.children.isEmpty(),
+                node.hidden
             ));
         }
 
         for (Node child : node.children) {
-            collectLines(child, depth + 1, targetType, out);
+            collectLines(child, depth + 1, targetType, out, includeHidden);
         }
     }
 
     private static class Node {
         private final CategoryRecord category;
         private final CategoryType type;
+        private final boolean hidden;
         private final List<Node> children = new ArrayList<>();
         private double actual;
         private double budget;
         private double difference;
         private double balance;
 
-        private Node(CategoryRecord category, CategoryType type) {
+        private Node(CategoryRecord category, CategoryType type, boolean hidden) {
             this.category = category;
             this.type = type;
+            this.hidden = hidden;
         }
     }
 

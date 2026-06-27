@@ -15,6 +15,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BudgetServiceTest {
@@ -94,6 +95,7 @@ class BudgetServiceTest {
         repository.upsertMonthlyBudget(month, categoryId, 125.0);
         repository.setMonthlyClassification(month, categoryId, CategoryType.DISCRETIONARY);
         repository.upsertMonthlyBalanceOverride(month, categoryId, 55.0);
+        repository.setMonthlyHidden(month, categoryId, true);
 
         service.deleteMonthData(month);
 
@@ -101,6 +103,7 @@ class BudgetServiceTest {
         assertTrue(repository.getMonthlyBudgets(month).isEmpty());
         assertTrue(repository.getMonthlyClassifications(month).isEmpty());
         assertTrue(repository.getMonthlyBalanceOverrides(month).isEmpty());
+        assertTrue(repository.getMonthlyHiddenCategoryIds(month).isEmpty());
         assertFalse(repository.getAvailableMonths().contains(month));
         assertTrue(repository.getAllCategories().isEmpty());
     }
@@ -119,6 +122,7 @@ class BudgetServiceTest {
         repository.upsertMonthlyBudget(month, categoryId, 1500.0);
         repository.setMonthlyClassification(month, categoryId, CategoryType.MANDATORY);
         repository.upsertMonthlyBalanceOverride(month, categoryId, 250.0);
+        repository.setMonthlyHidden(month, categoryId, true);
 
         service.deleteAllMonthsData();
 
@@ -126,8 +130,64 @@ class BudgetServiceTest {
         assertTrue(repository.getMonthlyBudgets(month).isEmpty());
         assertTrue(repository.getMonthlyClassifications(month).isEmpty());
         assertTrue(repository.getMonthlyBalanceOverrides(month).isEmpty());
+        assertTrue(repository.getMonthlyHiddenCategoryIds(month).isEmpty());
         assertTrue(repository.getAvailableMonths().isEmpty());
         assertTrue(repository.getAllCategories().isEmpty());
+    }
+
+    @Test
+    void hiddenLeafIsExcludedFromVisibleSnapshotAndTotals() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int autoId = repository.findOrCreateCategory("Auto", "Auto", null, 1, CategoryType.MANDATORY);
+        int fuelId = repository.findOrCreateCategory("Fuel", "Auto/Fuel", autoId, 2, CategoryType.MANDATORY);
+        int maintenanceId = repository.findOrCreateCategory("Maintenance", "Auto/Maintenance", autoId, 3, CategoryType.MANDATORY);
+
+        YearMonth month = YearMonth.of(2026, Month.MARCH);
+        repository.upsertMonthlyBudget(month, fuelId, 120.0);
+        repository.upsertMonthlyActual(month, fuelId, 70.0);
+        repository.upsertMonthlyBudget(month, maintenanceId, 80.0);
+        repository.upsertMonthlyActual(month, maintenanceId, 50.0);
+
+        service.updateCategoryHiddenState(month, fuelId, true);
+
+        BudgetLine parent = findLine(service.loadMonth(month, false).mandatory(), autoId);
+        assertEquals(80.0, parent.budgetAmount());
+        assertEquals(50.0, parent.actualAmount());
+        assertEquals(30.0, parent.difference());
+
+        boolean hiddenLeafPresent = service.loadMonth(month, false).mandatory().stream()
+            .anyMatch(line -> line.categoryId() == fuelId);
+        assertFalse(hiddenLeafPresent);
+    }
+
+    @Test
+    void hiddenLeafAppearsWhenIncludingHiddenAndMarkedHidden() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int parentId = repository.findOrCreateCategory("Auto", "Auto", null, 1, CategoryType.MANDATORY);
+        int fuelId = repository.findOrCreateCategory("Fuel", "Auto/Fuel", parentId, 2, CategoryType.MANDATORY);
+
+        YearMonth month = YearMonth.of(2026, Month.APRIL);
+        repository.upsertMonthlyBudget(month, fuelId, 150.0);
+        repository.upsertMonthlyActual(month, fuelId, 90.0);
+        service.updateCategoryHiddenState(month, fuelId, true);
+
+        BudgetLine hiddenLine = service.loadMonth(month, true).mandatory().stream()
+            .filter(line -> line.categoryId() == fuelId)
+            .findFirst()
+            .orElse(null);
+
+        assertNotNull(hiddenLine);
+        assertTrue(hiddenLine.hidden());
     }
 
     @Test
@@ -248,6 +308,7 @@ class BudgetServiceTest {
             statement.execute("DELETE FROM monthly_budgets");
             statement.execute("DELETE FROM monthly_actuals");
             statement.execute("DELETE FROM monthly_balance_overrides");
+            statement.execute("DELETE FROM monthly_hidden_categories");
             statement.execute("DELETE FROM categories");
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to reset test database", e);

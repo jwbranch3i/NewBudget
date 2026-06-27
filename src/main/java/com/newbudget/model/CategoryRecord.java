@@ -7,6 +7,7 @@ public record CategoryRecord(
     Integer parentId,
     int sortOrder,
     CategoryType defaultType,
-    boolean rollup
+    boolean rollup,
+    boolean hidden
 ) {
 }

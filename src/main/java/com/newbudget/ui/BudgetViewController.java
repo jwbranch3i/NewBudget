@@ -12,6 +12,7 @@ import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
@@ -43,6 +44,7 @@ public class BudgetViewController {
     private static final double CATEGORY_COL_WIDTH = 200;  //290;
     private static final double MONEY_COL_WIDTH = 75;  //110;
     private static final String ROLLUP_ROW_CLASS = "rollup-row";
+    private static final String HIDDEN_ROW_CLASS = "hidden-row";
     private static final String ZERO_MONEY = "$0.00";
 
     private BudgetRepository repository;
@@ -58,6 +60,9 @@ public class BudgetViewController {
     private Label selectedMonthLabel;
     @FXML
     private Label statusLabel;
+
+    @FXML
+    private CheckBox showHiddenToggle;
 
     @FXML
     private TreeTableView<BudgetTableRow> incomeTable;
@@ -142,6 +147,7 @@ public class BudgetViewController {
             }
         });
         monthPicker.setOnAction(event -> onMonthPicked());
+        showHiddenToggle.setOnAction(event -> onShowHiddenToggled());
 
         configureTable(incomeTable, incomeCategoryColumn, incomeActualColumn, incomeBudgetColumn, incomeDifferenceColumn, incomeBalanceColumn, false, null);
         configureTable(
@@ -490,32 +496,52 @@ public class BudgetViewController {
         row.itemProperty().addListener((obs, oldItem, newItem) -> {
             if (newItem == null) {
                 row.getStyleClass().remove(ROLLUP_ROW_CLASS);
+                row.getStyleClass().remove(HIDDEN_ROW_CLASS);
                 row.setContextMenu(null);
                 return;
             }
 
             row.getStyleClass().remove(ROLLUP_ROW_CLASS);
+            row.getStyleClass().remove(HIDDEN_ROW_CLASS);
             if (newItem.isRollup()) {
                 row.getStyleClass().add(ROLLUP_ROW_CLASS);
             }
-
-            if (!allowMove || moveAction == null || newItem.getType() == CategoryType.INCOME) {
-                row.setContextMenu(null);
-                return;
+            if (newItem.isHidden()) {
+                row.getStyleClass().add(HIDDEN_ROW_CLASS);
             }
 
-            String label = newItem.getType() == CategoryType.MANDATORY
-                ? "Move to Discretionary"
-                : "Move to Mandatory";
+            List<MenuItem> menuItems = new ArrayList<>();
 
-            MenuItem moveItem = new MenuItem(label);
-            moveItem.setOnAction(event -> {
-                moveAction.accept(newItem);
+            String hideLabel = newItem.isHidden() ? "Unhide Category" : "Hide Category";
+            MenuItem hideItem = new MenuItem(hideLabel);
+            hideItem.setOnAction(event -> {
+                budgetService.updateCategoryHiddenState(selectedMonth, newItem.getCategoryId(), !newItem.isHidden());
                 loadMonth(selectedMonth);
             });
-            row.setContextMenu(new ContextMenu(moveItem));
+            menuItems.add(hideItem);
+
+            if (allowMove && moveAction != null && newItem.getType() != CategoryType.INCOME) {
+                String moveLabel = newItem.getType() == CategoryType.MANDATORY
+                    ? "Move to Discretionary"
+                    : "Move to Mandatory";
+
+                MenuItem moveItem = new MenuItem(moveLabel);
+                moveItem.setOnAction(event -> {
+                    moveAction.accept(newItem);
+                    loadMonth(selectedMonth);
+                });
+                menuItems.add(moveItem);
+            }
+
+            row.setContextMenu(menuItems.isEmpty() ? null : new ContextMenu(menuItems.toArray(MenuItem[]::new)));
         });
         return row;
+    }
+
+    private void onShowHiddenToggled() {
+        if (selectedMonth != null) {
+            loadMonth(selectedMonth);
+        }
     }
 
     private TreeItem<BudgetTableRow> buildTree(List<BudgetTableRow> rows) {
@@ -631,7 +657,8 @@ public class BudgetViewController {
 
     private void loadMonth(YearMonth month) {
         try {
-            MonthSnapshot snapshot = budgetService.loadMonth(month);
+            boolean includeHidden = showHiddenToggle.isSelected();
+            MonthSnapshot snapshot = budgetService.loadMonth(month, includeHidden);
             List<BudgetTableRow> income = snapshot.income().stream().map(BudgetTableRow::new).toList();
             List<BudgetTableRow> mandatory = snapshot.mandatory().stream().map(BudgetTableRow::new).toList();
             List<BudgetTableRow> discretionary = snapshot.discretionary().stream().map(BudgetTableRow::new).toList();
@@ -651,7 +678,11 @@ public class BudgetViewController {
             );
 
             selectedMonthLabel.setText(MONTH_DISPLAY.format(month));
-            statusLabel.setText("Showing " + MONTH_DISPLAY.format(month));
+            statusLabel.setText(
+                includeHidden
+                    ? "Showing " + MONTH_DISPLAY.format(month) + " (including hidden categories)"
+                    : "Showing " + MONTH_DISPLAY.format(month)
+            );
         } catch (Exception ex) {
             showError("Load failed", ex.getMessage());
         }

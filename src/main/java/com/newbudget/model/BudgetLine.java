@@ -9,6 +9,7 @@ public record BudgetLine(
     double difference,
     double balance,
     CategoryType type,
-    boolean rollup
+    boolean rollup,
+    boolean hidden
 ) {
 }

@@ -2,6 +2,7 @@
 
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckBox?>
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.Menu?>
@@ -44,6 +45,7 @@
                         <Button mnemonicParsing="false" onAction="#onNextMonth" styleClass="month-nav-button" text="Next ▶" />
                         <Label styleClass="month-label" text="Month:" />
                         <ComboBox fx:id="monthPicker" styleClass="month-picker" />
+                        <CheckBox fx:id="showHiddenToggle" mnemonicParsing="false" styleClass="show-hidden-toggle" text="Show Hidden" />
                         <Button mnemonicParsing="false" onAction="#onImportCsv" styleClass="action-button" text="Import Actuals CSV" />
                         <Button mnemonicParsing="false" onAction="#onUseCurrentMonth" styleClass="secondary-button" text="Use Current Month" />
                     </children>

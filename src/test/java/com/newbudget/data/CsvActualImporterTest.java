@@ -96,6 +96,7 @@ class CsvActualImporterTest {
             statement.execute("DELETE FROM monthly_budgets");
             statement.execute("DELETE FROM monthly_actuals");
             statement.execute("DELETE FROM monthly_balance_overrides");
+            statement.execute("DELETE FROM monthly_hidden_categories");
             statement.execute("DELETE FROM categories");
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to reset test database", e);
