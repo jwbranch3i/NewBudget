@@ -104,8 +104,15 @@
 }
 
 .budget-table .tree-table-row-cell {
-    -fx-background-color: rgba(255, 255, 255, 0.88);
     -fx-border-color: transparent transparent #e7eefc transparent;
+}
+
+.budget-table .tree-table-row-cell:filled:even {
+    -fx-background-color: rgba(255, 255, 255, 0.9);
+}
+
+.budget-table .tree-table-row-cell:filled:odd {
+    -fx-background-color: rgba(240, 247, 255, 0.92);
 }
 
 .budget-table .tree-table-row-cell:filled:selected,
