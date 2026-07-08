@@ -32,6 +32,7 @@ public class CsvActualImporter {
         YearMonth month = detectMonth(rows)
             .orElseThrow(() -> new IllegalArgumentException("Unable to detect month from CSV file"));
 
+        boolean isNewMonth = !repository.hasAnyDataForMonth(month);
         repository.clearMonthActuals(month);
         repository.resetRollups();
 
@@ -115,6 +116,10 @@ public class CsvActualImporter {
             parseAmount(amountValue).ifPresent(amount -> repository.upsertMonthlyActual(month, categoryId, amount));
         }
 
+        if (isNewMonth) {
+            repository.ensureMonthlyBudgetsFromPrevious(month);
+            repository.ensureMonthlyHiddenCategoriesFromPrevious(month);
+        }
         repository.ensureMonthlyClassificationsFromDefaults(month);
         return month;
     }
