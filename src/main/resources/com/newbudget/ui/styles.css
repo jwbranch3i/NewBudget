@@ -11,6 +11,54 @@
     -fx-effect: dropshadow(gaussian, rgba(73, 122, 196, 0.18), 20, 0.15, 0, 4);
 }
 
+.summary-grid {
+    -fx-background-color: linear-gradient(to bottom, #f4f9ff 0%, #e9f2ff 100%);
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+    -fx-border-color: #c9dcfb;
+    -fx-hgap: 0;
+    -fx-vgap: 0;
+    -fx-padding: 0;
+}
+
+.summary-header {
+    -fx-padding: 6 6 6 6;
+    -fx-alignment: center-right;
+    -fx-font-size: 11px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #1f3557;
+    -fx-border-color: transparent transparent #d4e4ff transparent;
+}
+
+.summary-title {
+    -fx-alignment: center-left;
+    -fx-padding: 7 8 7 8;
+    -fx-background-color: linear-gradient(to bottom, #e5f0ff 0%, #dceaff 100%);
+}
+
+.summary-row-label {
+    -fx-padding: 6 8 6 8;
+    -fx-alignment: center-left;
+    -fx-font-size: 11px;
+    -fx-font-weight: 600;
+    -fx-text-fill: #244672;
+    -fx-border-color: transparent transparent #d9e8ff transparent;
+}
+
+.summary-cell {
+    -fx-padding: 6 8 6 8;
+    -fx-alignment: center-right;
+    -fx-font-size: 11px;
+    -fx-text-fill: #1f3557;
+    -fx-border-color: transparent transparent #d9e8ff transparent;
+}
+
+.summary-net-label,
+.summary-net-cell {
+    -fx-font-weight: 700;
+    -fx-background-color: rgba(211, 228, 255, 0.55);
+}
+
 .app-menu-bar {
     -fx-background-color: rgba(255, 255, 255, 0.92);
     -fx-background-radius: 10;

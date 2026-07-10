@@ -5,8 +5,10 @@ import com.newbudget.data.CsvActualImporter;
 import com.newbudget.model.CategoryType;
 import com.newbudget.model.MonthSnapshot;
 import com.newbudget.service.BudgetService;
+import javafx.beans.value.ChangeListener;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleStringProperty;
+import javafx.collections.ListChangeListener;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
@@ -33,8 +35,10 @@ import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.ToDoubleFunction;
@@ -132,6 +136,47 @@ public class BudgetViewController {
     private Label discretionaryBalanceTotal;
 
     @FXML
+    private Label summaryIncomeActual;
+    @FXML
+    private Label summaryIncomeBudget;
+    @FXML
+    private Label summaryIncomeDiff;
+    @FXML
+    private Label summaryIncomeBalance;
+
+    @FXML
+    private Label summaryMandatoryActual;
+    @FXML
+    private Label summaryMandatoryBudget;
+    @FXML
+    private Label summaryMandatoryDiff;
+    @FXML
+    private Label summaryMandatoryBalance;
+
+    @FXML
+    private Label summaryDiscretionaryActual;
+    @FXML
+    private Label summaryDiscretionaryBudget;
+    @FXML
+    private Label summaryDiscretionaryDiff;
+    @FXML
+    private Label summaryDiscretionaryBalance;
+
+    @FXML
+    private Label summaryNetActual;
+    @FXML
+    private Label summaryNetBudget;
+    @FXML
+    private Label summaryNetDiff;
+    @FXML
+    private Label summaryNetBalance;
+
+    private final Map<TreeItem<BudgetTableRow>, ListChangeListener<TreeItem<BudgetTableRow>>> treeChildrenListeners =
+        new IdentityHashMap<>();
+    private final Map<BudgetTableRow, ChangeListener<Number>> rowBudgetListeners = new IdentityHashMap<>();
+    private final Map<BudgetTableRow, ChangeListener<Number>> rowBalanceListeners = new IdentityHashMap<>();
+
+    @FXML
     private void initialize() {
         statusLabel.setText("Ready");
         selectedMonthLabel.setText("");
@@ -171,6 +216,7 @@ public class BudgetViewController {
             row -> budgetService.updateMonthlyClassificationGroup(selectedMonth, row.getCategoryId(), CategoryType.MANDATORY)
         );
 
+        installReactiveSummaryListeners();
         initializeTotals();
     }
 
@@ -452,6 +498,12 @@ public class BudgetViewController {
             }
         }) {
             @Override
+            public void updateItem(Number item, boolean empty) {
+                super.updateItem(item, empty);
+                setStyle("-fx-alignment: center-right;");
+            }
+
+            @Override
             public void startEdit() {
                 TreeTableView<BudgetTableRow> treeTable = getTreeTableView();
                 if (treeTable == null) {
@@ -613,23 +665,211 @@ public class BudgetViewController {
             discretionaryActualTotal,
             discretionaryBudgetTotal,
             discretionaryDifferenceTotal,
-            discretionaryBalanceTotal
+            discretionaryBalanceTotal,
+            summaryIncomeActual,
+            summaryIncomeBudget,
+            summaryIncomeDiff,
+            summaryIncomeBalance,
+            summaryMandatoryActual,
+            summaryMandatoryBudget,
+            summaryMandatoryDiff,
+            summaryMandatoryBalance,
+            summaryDiscretionaryActual,
+            summaryDiscretionaryBudget,
+            summaryDiscretionaryDiff,
+            summaryDiscretionaryBalance,
+            summaryNetActual,
+            summaryNetBudget,
+            summaryNetDiff,
+            summaryNetBalance
         )) {
             label.setText(ZERO_MONEY);
         }
     }
 
-    private void setTotals(Label actual, Label budget, Label difference, Label balance, List<BudgetTableRow> rows) {
-        NumberFormat money = NumberFormat.getCurrencyInstance(Locale.US);
+    static SectionTotals calculateSectionTotals(List<BudgetTableRow> rows) {
         double actualTotal = rows.stream().filter(row -> row.getDepth() == 0).mapToDouble(BudgetTableRow::getActualAmount).sum();
         double budgetTotal = rows.stream().filter(row -> row.getDepth() == 0).mapToDouble(BudgetTableRow::getBudgetAmount).sum();
         double differenceTotal = rows.stream().filter(row -> row.getDepth() == 0).mapToDouble(BudgetTableRow::getDifference).sum();
         double balanceTotal = rows.stream().filter(row -> row.getDepth() == 0).mapToDouble(BudgetTableRow::getBalance).sum();
+        return new SectionTotals(actualTotal, budgetTotal, differenceTotal, balanceTotal);
+    }
 
-        actual.setText(money.format(actualTotal));
-        budget.setText(money.format(budgetTotal));
-        difference.setText(money.format(differenceTotal));
-        balance.setText(money.format(balanceTotal));
+    static SectionTotals calculateNetTotals(
+        SectionTotals income,
+        SectionTotals mandatory,
+        SectionTotals discretionary
+    ) {
+        return new SectionTotals(
+            income.actual() - mandatory.actual() - discretionary.actual(),
+            income.budget() - mandatory.budget() - discretionary.budget(),
+            income.difference() - mandatory.difference() - discretionary.difference(),
+            income.balance() - mandatory.balance() - discretionary.balance()
+        );
+    }
+
+    private static SectionTotals calculateTableTotals(TreeTableView<BudgetTableRow> table) {
+        TreeItem<BudgetTableRow> root = table.getRoot();
+        if (root == null) {
+            return SectionTotals.ZERO;
+        }
+
+        double actualTotal = 0.0;
+        double budgetTotal = 0.0;
+        double differenceTotal = 0.0;
+        double balanceTotal = 0.0;
+
+        for (TreeItem<BudgetTableRow> child : root.getChildren()) {
+            BudgetTableRow row = child.getValue();
+            if (row == null) {
+                continue;
+            }
+            actualTotal += row.getActualAmount();
+            budgetTotal += row.getBudgetAmount();
+            differenceTotal += row.getDifference();
+            balanceTotal += row.getBalance();
+        }
+
+        return new SectionTotals(actualTotal, budgetTotal, differenceTotal, balanceTotal);
+    }
+
+    private void setTotals(Label actual, Label budget, Label difference, Label balance, SectionTotals totals) {
+        NumberFormat money = NumberFormat.getCurrencyInstance(Locale.US);
+        actual.setText(money.format(totals.actual()));
+        budget.setText(money.format(totals.budget()));
+        difference.setText(money.format(totals.difference()));
+        balance.setText(money.format(totals.balance()));
+    }
+
+    private void refreshTotalsAndSummaryFromTables() {
+        SectionTotals incomeTotals = calculateTableTotals(incomeTable);
+        SectionTotals mandatoryTotals = calculateTableTotals(mandatoryTable);
+        SectionTotals discretionaryTotals = calculateTableTotals(discretionaryTable);
+        SectionTotals netTotals = calculateNetTotals(incomeTotals, mandatoryTotals, discretionaryTotals);
+
+        setTotals(incomeActualTotal, incomeBudgetTotal, incomeDifferenceTotal, incomeBalanceTotal, incomeTotals);
+        setTotals(mandatoryActualTotal, mandatoryBudgetTotal, mandatoryDifferenceTotal, mandatoryBalanceTotal, mandatoryTotals);
+        setTotals(
+            discretionaryActualTotal,
+            discretionaryBudgetTotal,
+            discretionaryDifferenceTotal,
+            discretionaryBalanceTotal,
+            discretionaryTotals
+        );
+
+        setTotals(summaryIncomeActual, summaryIncomeBudget, summaryIncomeDiff, summaryIncomeBalance, incomeTotals);
+        setTotals(
+            summaryMandatoryActual,
+            summaryMandatoryBudget,
+            summaryMandatoryDiff,
+            summaryMandatoryBalance,
+            mandatoryTotals
+        );
+        setTotals(
+            summaryDiscretionaryActual,
+            summaryDiscretionaryBudget,
+            summaryDiscretionaryDiff,
+            summaryDiscretionaryBalance,
+            discretionaryTotals
+        );
+        setTotals(summaryNetActual, summaryNetBudget, summaryNetDiff, summaryNetBalance, netTotals);
+    }
+
+    private void installReactiveSummaryListeners() {
+        installTableSummaryListeners(incomeTable);
+        installTableSummaryListeners(mandatoryTable);
+        installTableSummaryListeners(discretionaryTable);
+    }
+
+    private void installTableSummaryListeners(TreeTableView<BudgetTableRow> table) {
+        table.rootProperty().addListener((obs, oldRoot, newRoot) -> {
+            detachTreeListeners(oldRoot);
+            attachTreeListeners(newRoot);
+            refreshTotalsAndSummaryFromTables();
+        });
+
+        if (table.getRoot() != null) {
+            attachTreeListeners(table.getRoot());
+        }
+    }
+
+    private void attachTreeListeners(TreeItem<BudgetTableRow> item) {
+        if (item == null) {
+            return;
+        }
+
+        attachRowListeners(item.getValue());
+
+        if (!treeChildrenListeners.containsKey(item)) {
+            ListChangeListener<TreeItem<BudgetTableRow>> childrenListener = change -> {
+                while (change.next()) {
+                    if (change.wasRemoved()) {
+                        for (TreeItem<BudgetTableRow> removed : change.getRemoved()) {
+                            detachTreeListeners(removed);
+                        }
+                    }
+                    if (change.wasAdded()) {
+                        for (TreeItem<BudgetTableRow> added : change.getAddedSubList()) {
+                            attachTreeListeners(added);
+                        }
+                    }
+                }
+                refreshTotalsAndSummaryFromTables();
+            };
+            item.getChildren().addListener(childrenListener);
+            treeChildrenListeners.put(item, childrenListener);
+        }
+
+        for (TreeItem<BudgetTableRow> child : item.getChildren()) {
+            attachTreeListeners(child);
+        }
+    }
+
+    private void detachTreeListeners(TreeItem<BudgetTableRow> item) {
+        if (item == null) {
+            return;
+        }
+
+        ListChangeListener<TreeItem<BudgetTableRow>> listener = treeChildrenListeners.remove(item);
+        if (listener != null) {
+            item.getChildren().removeListener(listener);
+        }
+
+        detachRowListeners(item.getValue());
+        for (TreeItem<BudgetTableRow> child : item.getChildren()) {
+            detachTreeListeners(child);
+        }
+    }
+
+    private void attachRowListeners(BudgetTableRow row) {
+        if (row == null || rowBudgetListeners.containsKey(row)) {
+            return;
+        }
+
+        ChangeListener<Number> budgetListener = (obs, oldValue, newValue) -> refreshTotalsAndSummaryFromTables();
+        ChangeListener<Number> balanceListener = (obs, oldValue, newValue) -> refreshTotalsAndSummaryFromTables();
+
+        row.budgetAmountProperty().addListener(budgetListener);
+        row.balanceProperty().addListener(balanceListener);
+
+        rowBudgetListeners.put(row, budgetListener);
+        rowBalanceListeners.put(row, balanceListener);
+    }
+
+    private void detachRowListeners(BudgetTableRow row) {
+        if (row == null) {
+            return;
+        }
+
+        ChangeListener<Number> budgetListener = rowBudgetListeners.remove(row);
+        if (budgetListener != null) {
+            row.budgetAmountProperty().removeListener(budgetListener);
+        }
+
+        ChangeListener<Number> balanceListener = rowBalanceListeners.remove(row);
+        if (balanceListener != null) {
+            row.balanceProperty().removeListener(balanceListener);
+        }
     }
 
     private void refreshMonths() {
@@ -672,16 +912,7 @@ public class BudgetViewController {
             applySection(incomeTable, income);
             applySection(mandatoryTable, mandatory);
             applySection(discretionaryTable, discretionary);
-
-            setTotals(incomeActualTotal, incomeBudgetTotal, incomeDifferenceTotal, incomeBalanceTotal, income);
-            setTotals(mandatoryActualTotal, mandatoryBudgetTotal, mandatoryDifferenceTotal, mandatoryBalanceTotal, mandatory);
-            setTotals(
-                discretionaryActualTotal,
-                discretionaryBudgetTotal,
-                discretionaryDifferenceTotal,
-                discretionaryBalanceTotal,
-                discretionary
-            );
+            refreshTotalsAndSummaryFromTables();
 
             selectedMonthLabel.setText(MONTH_DISPLAY.format(month));
             statusLabel.setText(
@@ -717,6 +948,11 @@ public class BudgetViewController {
         mandatoryTable.refresh();
         discretionaryTable.refresh();
         initializeTotals();
+        refreshTotalsAndSummaryFromTables();
+    }
+
+    record SectionTotals(double actual, double budget, double difference, double balance) {
+        private static final SectionTotals ZERO = new SectionTotals(0.0, 0.0, 0.0, 0.0);
     }
 
     private void showError(String title, String message) {

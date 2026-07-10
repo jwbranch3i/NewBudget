@@ -272,6 +272,64 @@ public class BudgetRepository {
         }
     }
 
+    public void ensureMonthlyBudgetsFromPrevious(YearMonth month) {
+        String monthKey = toMonthKey(month);
+        String sql = """
+            INSERT INTO monthly_budgets(month, category_id, budget_amount)
+            SELECT ?, prev.category_id, prev.budget_amount
+            FROM monthly_budgets prev
+            WHERE prev.month = (
+                SELECT MAX(month)
+                FROM monthly_budgets
+                WHERE month < ?
+            )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM monthly_budgets current
+                WHERE current.month = ?
+                  AND current.category_id = prev.category_id
+            )
+            """;
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, monthKey);
+            statement.setString(2, monthKey);
+            statement.setString(3, monthKey);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to seed monthly budgets", e);
+        }
+    }
+
+    public void ensureMonthlyHiddenCategoriesFromPrevious(YearMonth month) {
+        String monthKey = toMonthKey(month);
+        String sql = """
+            INSERT INTO monthly_hidden_categories(month, category_id)
+            SELECT ?, prev.category_id
+            FROM monthly_hidden_categories prev
+            WHERE prev.month = (
+                SELECT MAX(month)
+                FROM monthly_hidden_categories
+                WHERE month < ?
+            )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM monthly_hidden_categories current
+                WHERE current.month = ?
+                  AND current.category_id = prev.category_id
+            )
+            """;
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, monthKey);
+            statement.setString(2, monthKey);
+            statement.setString(3, monthKey);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to seed monthly hidden categories", e);
+        }
+    }
+
     public List<CategoryRecord> getAllCategories() {
         String sql = """
             SELECT id, name, path, parent_id, sort_order, default_type, is_rollup
@@ -423,6 +481,38 @@ public class BudgetRepository {
             return Optional.of(YearMonth.parse(month, MONTH_FORMAT));
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to load latest month", e);
+        }
+    }
+
+    public boolean hasAnyDataForMonth(YearMonth month) {
+        String sql = """
+            SELECT EXISTS(
+                SELECT 1 FROM (
+                    SELECT month FROM monthly_actuals WHERE month = ?
+                    UNION
+                    SELECT month FROM monthly_budgets WHERE month = ?
+                    UNION
+                    SELECT month FROM monthly_classifications WHERE month = ?
+                    UNION
+                    SELECT month FROM monthly_balance_overrides WHERE month = ?
+                    UNION
+                    SELECT month FROM monthly_hidden_categories WHERE month = ?
+                )
+            ) AS has_data
+            """;
+        String monthKey = toMonthKey(month);
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, monthKey);
+            statement.setString(2, monthKey);
+            statement.setString(3, monthKey);
+            statement.setString(4, monthKey);
+            statement.setString(5, monthKey);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt("has_data") == 1;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to check month data existence", e);
         }
     }
 

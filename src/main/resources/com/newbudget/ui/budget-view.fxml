@@ -48,6 +48,47 @@
                         <CheckBox fx:id="showHiddenToggle" mnemonicParsing="false" styleClass="show-hidden-toggle" text="Show Hidden" />
                         <Button mnemonicParsing="false" onAction="#onImportCsv" styleClass="action-button" text="Import Actuals CSV" />
                         <Button mnemonicParsing="false" onAction="#onUseCurrentMonth" styleClass="secondary-button" text="Use Current Month" />
+                        <GridPane styleClass="summary-grid">
+                            <columnConstraints>
+                                <ColumnConstraints prefWidth="130.0" />
+                                <ColumnConstraints prefWidth="90.0" />
+                                <ColumnConstraints prefWidth="90.0" />
+                                <ColumnConstraints prefWidth="90.0" />
+                                <ColumnConstraints prefWidth="90.0" />
+                            </columnConstraints>
+                            <children>
+                                <Label styleClass="summary-header summary-title" text="Summary" GridPane.columnSpan="5" GridPane.rowIndex="0" />
+                                <Label styleClass="summary-header" text="Category" GridPane.columnIndex="0" GridPane.rowIndex="1" />
+                                <Label styleClass="summary-header" text="Actual" GridPane.columnIndex="1" GridPane.rowIndex="1" />
+                                <Label styleClass="summary-header" text="Budget" GridPane.columnIndex="2" GridPane.rowIndex="1" />
+                                <Label styleClass="summary-header" text="Diff" GridPane.columnIndex="3" GridPane.rowIndex="1" />
+                                <Label styleClass="summary-header" text="Balance" GridPane.columnIndex="4" GridPane.rowIndex="1" />
+
+                                <Label styleClass="summary-row-label" text="Income" GridPane.columnIndex="0" GridPane.rowIndex="2" />
+                                <Label fx:id="summaryIncomeActual" styleClass="summary-cell" text="\$0.00" GridPane.columnIndex="1" GridPane.rowIndex="2" />
+                                <Label fx:id="summaryIncomeBudget" styleClass="summary-cell" text="\$0.00" GridPane.columnIndex="2" GridPane.rowIndex="2" />
+                                <Label fx:id="summaryIncomeDiff" styleClass="summary-cell" text="\$0.00" GridPane.columnIndex="3" GridPane.rowIndex="2" />
+                                <Label fx:id="summaryIncomeBalance" styleClass="summary-cell" text="\$0.00" GridPane.columnIndex="4" GridPane.rowIndex="2" />
+
+                                <Label styleClass="summary-row-label" text="Mandatory" GridPane.columnIndex="0" GridPane.rowIndex="3" />
+                                <Label fx:id="summaryMandatoryActual" styleClass="summary-cell" text="\$0.00" GridPane.columnIndex="1" GridPane.rowIndex="3" />
+                                <Label fx:id="summaryMandatoryBudget" styleClass="summary-cell" text="\$0.00" GridPane.columnIndex="2" GridPane.rowIndex="3" />
+                                <Label fx:id="summaryMandatoryDiff" styleClass="summary-cell" text="\$0.00" GridPane.columnIndex="3" GridPane.rowIndex="3" />
+                                <Label fx:id="summaryMandatoryBalance" styleClass="summary-cell" text="\$0.00" GridPane.columnIndex="4" GridPane.rowIndex="3" />
+
+                                <Label styleClass="summary-row-label" text="Discretionary" GridPane.columnIndex="0" GridPane.rowIndex="4" />
+                                <Label fx:id="summaryDiscretionaryActual" styleClass="summary-cell" text="\$0.00" GridPane.columnIndex="1" GridPane.rowIndex="4" />
+                                <Label fx:id="summaryDiscretionaryBudget" styleClass="summary-cell" text="\$0.00" GridPane.columnIndex="2" GridPane.rowIndex="4" />
+                                <Label fx:id="summaryDiscretionaryDiff" styleClass="summary-cell" text="\$0.00" GridPane.columnIndex="3" GridPane.rowIndex="4" />
+                                <Label fx:id="summaryDiscretionaryBalance" styleClass="summary-cell" text="\$0.00" GridPane.columnIndex="4" GridPane.rowIndex="4" />
+
+                                <Label styleClass="summary-row-label summary-net-label" text="Net" GridPane.columnIndex="0" GridPane.rowIndex="5" />
+                                <Label fx:id="summaryNetActual" styleClass="summary-cell summary-net-cell" text="\$0.00" GridPane.columnIndex="1" GridPane.rowIndex="5" />
+                                <Label fx:id="summaryNetBudget" styleClass="summary-cell summary-net-cell" text="\$0.00" GridPane.columnIndex="2" GridPane.rowIndex="5" />
+                                <Label fx:id="summaryNetDiff" styleClass="summary-cell summary-net-cell" text="\$0.00" GridPane.columnIndex="3" GridPane.rowIndex="5" />
+                                <Label fx:id="summaryNetBalance" styleClass="summary-cell summary-net-cell" text="\$0.00" GridPane.columnIndex="4" GridPane.rowIndex="5" />
+                            </children>
+                        </GridPane>
                     </children>
                 </HBox>
             </children>

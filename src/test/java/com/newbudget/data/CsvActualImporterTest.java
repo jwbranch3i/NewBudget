@@ -12,6 +12,7 @@ import java.time.YearMonth;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -88,6 +89,62 @@ class CsvActualImporterTest {
         assertEquals(auto.id(), fuel.parentId());
         assertTrue(!fuel.rollup());
         assertNull(computer.parentId());
+    }
+
+    @Test
+    void importingNewMonthCarriesPreviousHiddenAndBudgetValues() {
+        Database.initialize();
+        resetDatabase();
+        BudgetRepository repository = new BudgetRepository();
+        CsvActualImporter importer = new CsvActualImporter(repository);
+
+        YearMonth march = importer.importFile(Path.of("rawData", "Mar2026.csv"));
+
+        Integer amazonId = repository.getAllCategories().stream()
+            .filter(c -> c.name().equals("Amazon"))
+            .map(CategoryRecord::id)
+            .findFirst()
+            .orElse(null);
+
+        assertNotNull(amazonId);
+
+        repository.upsertMonthlyBudget(march, amazonId, 321.45);
+        repository.setMonthlyHidden(march, amazonId, true);
+
+        YearMonth april = importer.importFile(Path.of("rawData", "Apr2026.csv"));
+
+        assertEquals(321.45, repository.getMonthlyBudgets(april).get(amazonId));
+        assertTrue(repository.getMonthlyHiddenCategoryIds(april).contains(amazonId));
+    }
+
+    @Test
+    void reimportSameMonthDoesNotOverwriteBudgetOrHiddenChanges() {
+        Database.initialize();
+        resetDatabase();
+        BudgetRepository repository = new BudgetRepository();
+        CsvActualImporter importer = new CsvActualImporter(repository);
+
+        YearMonth march = importer.importFile(Path.of("rawData", "Mar2026.csv"));
+
+        Integer amazonId = repository.getAllCategories().stream()
+            .filter(c -> c.name().equals("Amazon"))
+            .map(CategoryRecord::id)
+            .findFirst()
+            .orElse(null);
+
+        assertNotNull(amazonId);
+
+        repository.upsertMonthlyBudget(march, amazonId, 100.0);
+        repository.setMonthlyHidden(march, amazonId, true);
+
+        YearMonth april = importer.importFile(Path.of("rawData", "Apr2026.csv"));
+        repository.upsertMonthlyBudget(april, amazonId, 555.0);
+        repository.setMonthlyHidden(april, amazonId, false);
+
+        importer.importFile(Path.of("rawData", "Apr2026.csv"));
+
+        assertEquals(555.0, repository.getMonthlyBudgets(april).get(amazonId));
+        assertFalse(repository.getMonthlyHiddenCategoryIds(april).contains(amazonId));
     }
 
     private void resetDatabase() {
