@@ -498,6 +498,12 @@ public class BudgetViewController {
             }
         }) {
             @Override
+            public void updateItem(Number item, boolean empty) {
+                super.updateItem(item, empty);
+                setStyle("-fx-alignment: center-right;");
+            }
+
+            @Override
             public void startEdit() {
                 TreeTableView<BudgetTableRow> treeTable = getTreeTableView();
                 if (treeTable == null) {
