@@ -7,6 +7,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -39,7 +40,7 @@ public class BudgetRepository {
             VALUES (?, ?, ?, ?, ?, 0)
             """;
         try (Connection connection = Database.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql, PreparedStatement.RETURN_GENERATED_KEYS)) {
+             PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             statement.setString(1, name);
             statement.setString(2, path);
             if (parentId == null) {
@@ -82,6 +83,38 @@ public class BudgetRepository {
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to reset rollup categories", e);
         }
+    }
+
+    public void setMasterCategory(int categoryId, boolean master) {
+        if (master && !categoryHasChildren(categoryId)) {
+            throw new IllegalArgumentException("Only parent categories can be marked as master categories");
+        }
+
+        String sql = "UPDATE categories SET is_master = ? WHERE id = ?";
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, master ? 1 : 0);
+            statement.setInt(2, categoryId);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to update master category state", e);
+        }
+    }
+
+    public boolean isMasterCategory(int categoryId) {
+        String sql = "SELECT is_master FROM categories WHERE id = ?";
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, categoryId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    return resultSet.getInt("is_master") == 1;
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to load master category state", e);
+        }
+        throw new IllegalStateException("Category not found: " + categoryId);
     }
 
     public void clearMonthActuals(YearMonth month) {
@@ -332,7 +365,7 @@ public class BudgetRepository {
 
     public List<CategoryRecord> getAllCategories() {
         String sql = """
-            SELECT id, name, path, parent_id, sort_order, default_type, is_rollup
+            SELECT id, name, path, parent_id, sort_order, default_type, is_rollup, is_master
             FROM categories
             ORDER BY sort_order, id
             """;
@@ -352,6 +385,7 @@ public class BudgetRepository {
                     resultSet.getInt("sort_order"),
                     CategoryType.fromDb(resultSet.getString("default_type")),
                     resultSet.getInt("is_rollup") == 1,
+                    resultSet.getInt("is_master") == 1,
                     false
                 ));
             }
@@ -558,6 +592,19 @@ public class BudgetRepository {
             throw new IllegalStateException("Failed to load category type", e);
         }
         throw new IllegalStateException("Category not found: " + categoryId);
+    }
+
+    public boolean categoryHasChildren(int categoryId) {
+        String sql = "SELECT EXISTS(SELECT 1 FROM categories WHERE parent_id = ?) AS has_children";
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, categoryId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt("has_children") == 1;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to check category children", e);
+        }
     }
 
     private Integer findCategoryByPath(String path) {

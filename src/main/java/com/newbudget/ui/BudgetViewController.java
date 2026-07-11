@@ -48,6 +48,7 @@ public class BudgetViewController {
     private static final double CATEGORY_COL_WIDTH = 200;  //290;
     private static final double MONEY_COL_WIDTH = 75;  //110;
     private static final String ROLLUP_ROW_CLASS = "rollup-row";
+    private static final String MASTER_ROW_CLASS = "master-row";
     private static final String HIDDEN_ROW_CLASS = "hidden-row";
     private static final String ZERO_MONEY = "$0.00";
 
@@ -404,12 +405,13 @@ public class BudgetViewController {
         NumberFormat money = NumberFormat.getCurrencyInstance(Locale.US);
 
         configureCategoryColumn(categoryColumn);
-        configureMoneyColumn(actualColumn, BudgetTableRow::getActualAmount, money);
+        configureMoneyColumn(actualColumn, BudgetTableRow::getActualAmount, money, false);
         configureBudgetColumn(budgetColumn, money);
         configureMoneyColumn(
             differenceColumn,
             row -> row.isRollup() ? row.getBudgetAmount() - row.getActualAmount() : row.getDifference(),
-            money
+            money,
+            true
         );
         configureBalanceColumn(balanceColumn, money);
         table.setRowFactory(tv -> createRow(moveAction, allowMove));
@@ -448,6 +450,10 @@ public class BudgetViewController {
             @Override
             public void updateItem(Number item, boolean empty) {
                 super.updateItem(item, empty);
+                BudgetTableRow row = getCurrentRow(getTreeTableRow());
+                if (!isEditing() && shouldBlankBudgetLikeCell(row)) {
+                    setText("");
+                }
                 setStyle("-fx-alignment: center-right;");
             }
 
@@ -459,7 +465,7 @@ public class BudgetViewController {
                 }
 
                 TreeItem<BudgetTableRow> treeItem = treeTable.getTreeItem(getIndex());
-                if (treeItem == null || treeItem.getValue() == null || treeItem.getValue().isRollup()) {
+                if (!canEditBudget(treeItem)) {
                     return;
                 }
 
@@ -471,7 +477,7 @@ public class BudgetViewController {
     }
 
     private void onBudgetEdited(TreeItem<BudgetTableRow> treeItem, Number newValue) {
-        if (treeItem == null || treeItem.getValue() == null || treeItem.getValue().isRollup()) {
+        if (!canEditBudget(treeItem)) {
             return;
         }
 
@@ -500,6 +506,10 @@ public class BudgetViewController {
             @Override
             public void updateItem(Number item, boolean empty) {
                 super.updateItem(item, empty);
+                BudgetTableRow row = getCurrentRow(getTreeTableRow());
+                if (!isEditing() && shouldBlankBudgetLikeCell(row)) {
+                    setText("");
+                }
                 setStyle("-fx-alignment: center-right;");
             }
 
@@ -511,7 +521,7 @@ public class BudgetViewController {
                 }
 
                 TreeItem<BudgetTableRow> treeItem = treeTable.getTreeItem(getIndex());
-                if (treeItem == null || treeItem.getValue() == null || !treeItem.getChildren().isEmpty()) {
+                if (!canEditBalance(treeItem)) {
                     return;
                 }
 
@@ -523,7 +533,7 @@ public class BudgetViewController {
     }
 
     private void onBalanceEdited(TreeItem<BudgetTableRow> treeItem, Number newValue) {
-        if (treeItem == null || treeItem.getValue() == null || !treeItem.getChildren().isEmpty()) {
+        if (!canEditBalance(treeItem)) {
             return;
         }
 
@@ -535,14 +545,22 @@ public class BudgetViewController {
     private void configureMoneyColumn(
         TreeTableColumn<BudgetTableRow, Number> column,
         ToDoubleFunction<BudgetTableRow> getter,
-        NumberFormat format
+        NumberFormat format,
+        boolean blankWhenChildOfMaster
     ) {
         column.setCellValueFactory(cell -> new SimpleDoubleProperty(getter.applyAsDouble(cell.getValue().getValue())));
         column.setCellFactory(col -> new TreeTableCell<>() {
             @Override
             protected void updateItem(Number item, boolean empty) {
                 super.updateItem(item, empty);
-                setText(empty || item == null ? null : format.format(item.doubleValue()));
+                BudgetTableRow row = getCurrentRow(getTreeTableRow());
+                if (empty || item == null) {
+                    setText(null);
+                } else if (blankWhenChildOfMaster && shouldBlankBudgetLikeCell(row)) {
+                    setText("");
+                } else {
+                    setText(format.format(item.doubleValue()));
+                }
                 setStyle("-fx-alignment: center-right;");
             }
         });
@@ -554,21 +572,36 @@ public class BudgetViewController {
         row.itemProperty().addListener((obs, oldItem, newItem) -> {
             if (newItem == null) {
                 row.getStyleClass().remove(ROLLUP_ROW_CLASS);
+                row.getStyleClass().remove(MASTER_ROW_CLASS);
                 row.getStyleClass().remove(HIDDEN_ROW_CLASS);
                 row.setContextMenu(null);
                 return;
             }
 
             row.getStyleClass().remove(ROLLUP_ROW_CLASS);
+            row.getStyleClass().remove(MASTER_ROW_CLASS);
             row.getStyleClass().remove(HIDDEN_ROW_CLASS);
             if (newItem.isRollup()) {
                 row.getStyleClass().add(ROLLUP_ROW_CLASS);
+            }
+            if (newItem.isMaster()) {
+                row.getStyleClass().add(MASTER_ROW_CLASS);
             }
             if (newItem.isHidden()) {
                 row.getStyleClass().add(HIDDEN_ROW_CLASS);
             }
 
             List<MenuItem> menuItems = new ArrayList<>();
+
+            TreeItem<BudgetTableRow> treeItem = row.getTreeItem();
+            if (shouldOfferMasterToggle(newItem, treeItem)) {
+                MenuItem masterItem = new MenuItem(newItem.isMaster() ? "Make Regular Category" : "Make Master Category");
+                masterItem.setOnAction(event -> {
+                    budgetService.updateMasterCategory(newItem.getCategoryId(), !newItem.isMaster());
+                    loadMonth(selectedMonth);
+                });
+                menuItems.add(masterItem);
+            }
 
             String hideLabel = newItem.isHidden() ? "Unhide Category" : "Hide Category";
             MenuItem hideItem = new MenuItem(hideLabel);
@@ -645,11 +678,49 @@ public class BudgetViewController {
             leafBudgetSum += enforceRollupBudgetFromLeaves(child);
         }
 
-        if (row != null && row.isRollup()) {
+        if (row != null && row.isRollup() && !row.isMaster()) {
             row.setBudgetAmount(leafBudgetSum);
         }
 
         return leafBudgetSum;
+    }
+
+    static boolean shouldBlankBudgetLikeCell(BudgetTableRow row) {
+        return row != null && row.isChildOfMaster();
+    }
+
+    static boolean shouldOfferMasterToggle(BudgetTableRow row, TreeItem<BudgetTableRow> treeItem) {
+        return row != null && treeItem != null && !treeItem.getChildren().isEmpty();
+    }
+
+    private boolean canEditBudget(TreeItem<BudgetTableRow> treeItem) {
+        BudgetTableRow row = getCurrentRow(treeItem);
+        if (row == null || row.isChildOfMaster()) {
+            return false;
+        }
+        if (row.isMaster()) {
+            return true;
+        }
+        return !row.isRollup();
+    }
+
+    private boolean canEditBalance(TreeItem<BudgetTableRow> treeItem) {
+        BudgetTableRow row = getCurrentRow(treeItem);
+        if (row == null || row.isChildOfMaster()) {
+            return false;
+        }
+        if (row.isMaster()) {
+            return true;
+        }
+        return treeItem != null && treeItem.getChildren().isEmpty();
+    }
+
+    private static BudgetTableRow getCurrentRow(TreeItem<BudgetTableRow> treeItem) {
+        return treeItem == null ? null : treeItem.getValue();
+    }
+
+    private static BudgetTableRow getCurrentRow(TreeTableRow<BudgetTableRow> tableRow) {
+        return tableRow == null ? null : tableRow.getItem();
     }
 
     private void initializeTotals() {

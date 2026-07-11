@@ -19,6 +19,8 @@ public class BudgetTableRow {
     private final DoubleProperty balance;
     private final CategoryType type;
     private final boolean rollup;
+    private final boolean master;
+    private final boolean childOfMaster;
     private final boolean hidden;
 
     public BudgetTableRow(BudgetLine line) {
@@ -31,6 +33,8 @@ public class BudgetTableRow {
         this.balance = new SimpleDoubleProperty(line.balance());
         this.type = line.type();
         this.rollup = line.rollup();
+        this.master = line.master();
+        this.childOfMaster = line.childOfMaster();
         this.hidden = line.hidden();
     }
 
@@ -76,6 +80,14 @@ public class BudgetTableRow {
 
     public boolean isRollup() {
         return rollup;
+    }
+
+    public boolean isMaster() {
+        return master;
+    }
+
+    public boolean isChildOfMaster() {
+        return childOfMaster;
     }
 
     public boolean isHidden() {

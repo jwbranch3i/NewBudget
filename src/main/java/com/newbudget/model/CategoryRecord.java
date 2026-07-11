@@ -8,6 +8,7 @@ public record CategoryRecord(
     int sortOrder,
     CategoryType defaultType,
     boolean rollup,
+    boolean master,
     boolean hidden
 ) {
 }

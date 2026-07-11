@@ -184,6 +184,27 @@
     -fx-background-color: linear-gradient(to right, #f4f8ff 0%, #eef4ff 100%);
 }
 
+.budget-table .tree-table-row-cell.master-row {
+    -fx-font-weight: 700;
+    -fx-background-color: linear-gradient(to right, #fff4d9 0%, #ffe7ad 100%);
+    -fx-border-color: transparent transparent #efd38a transparent;
+}
+
+.budget-table .tree-table-row-cell.master-row .tree-table-cell {
+    -fx-text-fill: #6e4d00;
+}
+
+.budget-table .tree-table-row-cell.master-row:filled:selected,
+.budget-table:focused .tree-table-row-cell.master-row:filled:selected {
+    -fx-background-color: linear-gradient(to bottom, #d49a17 0%, #b57c09 100%);
+    -fx-border-color: transparent transparent #9a6700 transparent;
+}
+
+.budget-table .tree-table-row-cell.master-row:filled:selected .tree-table-cell,
+.budget-table:focused .tree-table-row-cell.master-row:filled:selected .tree-table-cell {
+    -fx-text-fill: #ffffff;
+}
+
 .budget-table .tree-table-row-cell.hidden-row {
     -fx-background-color: linear-gradient(to right, #ececec 0%, #dddddd 100%);
     -fx-border-color: transparent transparent #d2d2d2 transparent;

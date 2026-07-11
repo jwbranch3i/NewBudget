@@ -35,7 +35,7 @@ public class BudgetService {
         List<CategoryRecord> categories = repository.getAllCategories();
         Map<Integer, Double> monthlyActuals = repository.getMonthlyActuals(month);
         Map<Integer, Double> monthlyBudgets = repository.getMonthlyBudgets(month);
-        Map<Integer, Double> effectiveBalances = computeEffectiveBalances(month);
+        Map<Integer, Double> effectiveBalances = computeEffectiveBalances(month, categories);
         Map<Integer, CategoryType> monthlyTypes = repository.getMonthlyClassifications(month);
         Set<Integer> hiddenCategoryIds = repository.getMonthlyHiddenCategoryIds(month);
 
@@ -74,9 +74,9 @@ public class BudgetService {
         List<BudgetLine> discretionaryLines = new ArrayList<>();
 
         for (Node root : roots) {
-            collectLines(root, 0, CategoryType.INCOME, incomeLines, includeHidden);
-            collectLines(root, 0, CategoryType.MANDATORY, mandatoryLines, includeHidden);
-            collectLines(root, 0, CategoryType.DISCRETIONARY, discretionaryLines, includeHidden);
+            collectLines(root, 0, CategoryType.INCOME, incomeLines, includeHidden, false);
+            collectLines(root, 0, CategoryType.MANDATORY, mandatoryLines, includeHidden, false);
+            collectLines(root, 0, CategoryType.DISCRETIONARY, discretionaryLines, includeHidden, false);
         }
 
         return new MonthSnapshot(month, incomeLines, mandatoryLines, discretionaryLines);
@@ -87,7 +87,19 @@ public class BudgetService {
     }
 
     public void updateBalance(YearMonth month, int categoryId, double balanceAmount) {
+        if (repository.isMasterCategory(categoryId) && repository.categoryHasChildren(categoryId)) {
+            double currentBudget = repository.getMonthlyBudgets(month).getOrDefault(categoryId, 0.0);
+            double childActualTotal = calculateChildActualTotal(month, categoryId);
+            double storedMasterBalance = balanceAmount - currentBudget + childActualTotal;
+            repository.upsertMonthlyBalanceOverride(month, categoryId, storedMasterBalance);
+            return;
+        }
+
         repository.upsertMonthlyBalanceOverride(month, categoryId, balanceAmount);
+    }
+
+    public void updateMasterCategory(int categoryId, boolean master) {
+        repository.setMasterCategory(categoryId, master);
     }
 
     public void updateMonthlyClassification(YearMonth month, int categoryId, CategoryType type) {
@@ -203,18 +215,30 @@ public class BudgetService {
         }
 
         double actual = monthlyActuals.getOrDefault(node.category.id(), 0.0);
-        double budget = monthlyBudgets.getOrDefault(node.category.id(), 0.0);
+        double ownBudget = monthlyBudgets.getOrDefault(node.category.id(), 0.0);
         double ownBalance = effectiveBalances.getOrDefault(node.category.id(), 0.0);
         double childBalance = 0.0;
+        double childActual = 0.0;
+        double childBudget = 0.0;
 
         for (Node child : node.children) {
             Totals childTotals = calculateNode(child, monthlyActuals, monthlyBudgets, effectiveBalances, includeHidden);
-            actual += childTotals.actual;
-            budget += childTotals.budget;
+            childActual += childTotals.actual;
+            childBudget += childTotals.budget;
             childBalance += childTotals.balance;
         }
 
-        double balance = node.children.isEmpty() ? ownBalance : childBalance;
+        double budget;
+        double balance;
+        if (node.category.master() && !node.children.isEmpty()) {
+            actual = childActual;
+            budget = ownBudget;
+            balance = ownBalance;
+        } else {
+            actual += childActual;
+            budget = ownBudget + childBudget;
+            balance = node.children.isEmpty() ? ownBalance : childBalance;
+        }
 
         node.actual = actual;
         node.budget = budget;
@@ -223,65 +247,67 @@ public class BudgetService {
         return new Totals(actual, budget, balance);
     }
 
-    private Map<Integer, Double> computeEffectiveBalances(YearMonth month) {
+    private Map<Integer, Double> computeEffectiveBalances(YearMonth month, List<CategoryRecord> categories) {
         Map<Integer, Map<YearMonth, Double>> budgetsByMonth = repository.getMonthlyBudgetAmountsUpTo(month);
         Map<Integer, Map<YearMonth, Double>> actualsByMonth = repository.getMonthlyActualAmountsUpTo(month);
         Map<Integer, Map<YearMonth, Double>> overridesByMonth = repository.getMonthlyBalanceOverridesUpTo(month);
+
+        Map<Integer, Node> nodesById = new HashMap<>();
+        for (CategoryRecord category : categories) {
+            nodesById.put(category.id(), new Node(category, category.defaultType(), false));
+        }
+
+        List<Node> roots = new ArrayList<>();
+        for (Node node : nodesById.values()) {
+            Integer parentId = node.category.parentId();
+            if (parentId == null) {
+                roots.add(node);
+                continue;
+            }
+
+            Node parent = nodesById.get(parentId);
+            if (parent != null) {
+                parent.children.add(node);
+            }
+        }
+
+        Comparator<Node> byOrder = Comparator.comparingInt(n -> n.category.sortOrder());
+        roots.sort(byOrder);
+        for (Node node : nodesById.values()) {
+            node.children.sort(byOrder);
+        }
 
         TreeSet<Integer> categoryIds = new TreeSet<>();
         categoryIds.addAll(budgetsByMonth.keySet());
         categoryIds.addAll(actualsByMonth.keySet());
         categoryIds.addAll(overridesByMonth.keySet());
 
-        Map<Integer, Double> balances = new HashMap<>();
-        for (Integer categoryId : categoryIds) {
-            NavigableMap<YearMonth, Double> diffsByMonth = new java.util.TreeMap<>();
-            mergeMonthlyAmounts(diffsByMonth, budgetsByMonth.get(categoryId), 1.0);
-            mergeMonthlyAmounts(diffsByMonth, actualsByMonth.get(categoryId), -1.0);
+        Map<Integer, Double> previousBalances = new HashMap<>();
+        java.util.TreeSet<YearMonth> timelineMonths = new java.util.TreeSet<>();
+        timelineMonths.add(month);
+        collectTimelineMonths(budgetsByMonth, timelineMonths);
+        collectTimelineMonths(actualsByMonth, timelineMonths);
+        collectTimelineMonths(overridesByMonth, timelineMonths);
 
-            NavigableMap<YearMonth, Double> overrides = toNavigableMap(overridesByMonth.get(categoryId));
-
-            java.util.TreeSet<YearMonth> timelineMonths = new java.util.TreeSet<>();
-            timelineMonths.addAll(diffsByMonth.keySet());
-            timelineMonths.addAll(overrides.keySet());
-
-            double runningBalance = 0.0;
-            for (YearMonth timelineMonth : timelineMonths) {
-                if (overrides.containsKey(timelineMonth)) {
-                    runningBalance = overrides.get(timelineMonth);
-                } else {
-                    runningBalance += diffsByMonth.getOrDefault(timelineMonth, 0.0);
-                }
+        for (YearMonth timelineMonth : timelineMonths) {
+            Map<Integer, Double> currentBalances = new HashMap<>(categoryIds.size());
+            for (Node root : roots) {
+                computeBalanceStateForMonth(root, timelineMonth, budgetsByMonth, actualsByMonth, overridesByMonth, previousBalances, currentBalances);
             }
-
-            balances.put(categoryId, runningBalance);
+            previousBalances = currentBalances;
         }
 
-        return balances;
+        return previousBalances;
     }
 
-    private void mergeMonthlyAmounts(
-        NavigableMap<YearMonth, Double> target,
-        Map<YearMonth, Double> amounts,
-        double factor
+    private void collectLines(
+        Node node,
+        int depth,
+        CategoryType targetType,
+        List<BudgetLine> out,
+        boolean includeHidden,
+        boolean childOfMaster
     ) {
-        if (amounts == null || amounts.isEmpty()) {
-            return;
-        }
-
-        for (Map.Entry<YearMonth, Double> entry : amounts.entrySet()) {
-            target.merge(entry.getKey(), entry.getValue() * factor, Double::sum);
-        }
-    }
-
-    private NavigableMap<YearMonth, Double> toNavigableMap(Map<YearMonth, Double> values) {
-        if (values == null || values.isEmpty()) {
-            return new java.util.TreeMap<>();
-        }
-        return new java.util.TreeMap<>(values);
-    }
-
-    private void collectLines(Node node, int depth, CategoryType targetType, List<BudgetLine> out, boolean includeHidden) {
         if (!includeHidden && node.hidden) {
             return;
         }
@@ -297,13 +323,104 @@ public class BudgetService {
                 node.balance,
                 node.type,
                 node.category.rollup() || !node.children.isEmpty(),
+                node.category.master() && !node.children.isEmpty(),
+                childOfMaster,
                 node.hidden
             ));
         }
 
+        boolean descendantOfMaster = childOfMaster || (node.category.master() && !node.children.isEmpty());
         for (Node child : node.children) {
-            collectLines(child, depth + 1, targetType, out, includeHidden);
+            collectLines(child, depth + 1, targetType, out, includeHidden, descendantOfMaster);
         }
+    }
+
+    private BalanceState computeBalanceStateForMonth(
+        Node node,
+        YearMonth timelineMonth,
+        Map<Integer, Map<YearMonth, Double>> budgetsByMonth,
+        Map<Integer, Map<YearMonth, Double>> actualsByMonth,
+        Map<Integer, Map<YearMonth, Double>> overridesByMonth,
+        Map<Integer, Double> previousBalances,
+        Map<Integer, Double> currentBalances
+    ) {
+        double ownBudget = getMonthlyAmount(budgetsByMonth, node.category.id(), timelineMonth);
+        double ownActual = getMonthlyAmount(actualsByMonth, node.category.id(), timelineMonth);
+        double childActual = 0.0;
+        double childBalance = 0.0;
+
+        for (Node child : node.children) {
+            BalanceState childState = computeBalanceStateForMonth(
+                child,
+                timelineMonth,
+                budgetsByMonth,
+                actualsByMonth,
+                overridesByMonth,
+                previousBalances,
+                currentBalances
+            );
+            childActual += childState.actual();
+            childBalance += childState.balance();
+        }
+
+        double previousBalance = previousBalances.getOrDefault(node.category.id(), 0.0);
+        Double override = getMonthlyOverride(overridesByMonth, node.category.id(), timelineMonth);
+        double currentBalance;
+        if (node.category.master() && !node.children.isEmpty()) {
+            currentBalance = override != null
+                ? ownBudget + override - childActual
+                : previousBalance + ownBudget - childActual;
+        } else if (!node.children.isEmpty()) {
+            currentBalance = childBalance;
+        } else if (override != null) {
+            currentBalance = override;
+        } else {
+            currentBalance = previousBalance + ownBudget - ownActual;
+        }
+
+        currentBalances.put(node.category.id(), currentBalance);
+        return new BalanceState(ownActual + childActual, currentBalance);
+    }
+
+    private double calculateChildActualTotal(YearMonth month, int categoryId) {
+        List<CategoryRecord> categories = repository.getAllCategories();
+        Map<Integer, List<Integer>> childrenByParentId = new HashMap<>();
+        for (CategoryRecord category : categories) {
+            if (category.parentId() != null) {
+                childrenByParentId.computeIfAbsent(category.parentId(), ignored -> new ArrayList<>()).add(category.id());
+            }
+        }
+
+        Map<Integer, Double> actuals = repository.getMonthlyActuals(month);
+        double childActualTotal = 0.0;
+        for (Integer childId : collectSubtreeCategoryIds(categoryId, childrenByParentId)) {
+            if (childId != categoryId) {
+                childActualTotal += actuals.getOrDefault(childId, 0.0);
+            }
+        }
+        return childActualTotal;
+    }
+
+    private void collectTimelineMonths(Map<Integer, Map<YearMonth, Double>> amountsByCategory, Set<YearMonth> timelineMonths) {
+        for (Map<YearMonth, Double> amounts : amountsByCategory.values()) {
+            timelineMonths.addAll(amounts.keySet());
+        }
+    }
+
+    private double getMonthlyAmount(Map<Integer, Map<YearMonth, Double>> amountsByCategory, int categoryId, YearMonth month) {
+        Map<YearMonth, Double> amounts = amountsByCategory.get(categoryId);
+        if (amounts == null) {
+            return 0.0;
+        }
+        return amounts.getOrDefault(month, 0.0);
+    }
+
+    private Double getMonthlyOverride(Map<Integer, Map<YearMonth, Double>> overridesByCategory, int categoryId, YearMonth month) {
+        Map<YearMonth, Double> overrides = overridesByCategory.get(categoryId);
+        if (overrides == null || !overrides.containsKey(month)) {
+            return null;
+        }
+        return overrides.get(month);
     }
 
     private static class Node {
@@ -324,5 +441,8 @@ public class BudgetService {
     }
 
     private record Totals(double actual, double budget, double balance) {
+    }
+
+    private record BalanceState(double actual, double balance) {
     }
 }

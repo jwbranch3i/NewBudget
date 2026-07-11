@@ -16,6 +16,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BudgetServiceTest {
@@ -293,6 +294,82 @@ class BudgetServiceTest {
         assertEquals(150.0, januaryBalance);
         assertEquals(300.0, februaryBalance);
         assertEquals(340.0, marchBalance);
+    }
+
+    @Test
+    void masterCategoryUsesParentBudgetAndChildActuals() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int autoId = repository.findOrCreateCategory("Auto", "Auto", null, 1, CategoryType.MANDATORY);
+        int fuelId = repository.findOrCreateCategory("Fuel", "Auto/Fuel", autoId, 2, CategoryType.MANDATORY);
+        int maintenanceId = repository.findOrCreateCategory("Maintenance", "Auto/Maintenance", autoId, 3, CategoryType.MANDATORY);
+        repository.markRollup(autoId);
+        service.updateMasterCategory(autoId, true);
+
+        YearMonth month = YearMonth.of(2026, Month.MARCH);
+        repository.upsertMonthlyBudget(month, autoId, 400.0);
+        repository.upsertMonthlyBudget(month, fuelId, 125.0);
+        repository.upsertMonthlyBudget(month, maintenanceId, 175.0);
+        repository.upsertMonthlyActual(month, fuelId, 80.0);
+        repository.upsertMonthlyActual(month, maintenanceId, 50.0);
+
+        BudgetLine parent = findLine(service.loadMonth(month).mandatory(), autoId);
+        BudgetLine fuel = findLine(service.loadMonth(month).mandatory(), fuelId);
+        BudgetLine maintenance = findLine(service.loadMonth(month).mandatory(), maintenanceId);
+
+        assertTrue(parent.master());
+        assertEquals(130.0, parent.actualAmount());
+        assertEquals(400.0, parent.budgetAmount());
+        assertEquals(270.0, parent.difference());
+        assertEquals(270.0, parent.balance());
+
+        assertTrue(fuel.childOfMaster());
+        assertTrue(maintenance.childOfMaster());
+        assertEquals(125.0, fuel.budgetAmount());
+        assertEquals(175.0, maintenance.budgetAmount());
+    }
+
+    @Test
+    void editingMasterCategoryBalancePersistsDisplayedValue() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int autoId = repository.findOrCreateCategory("Auto", "Auto", null, 1, CategoryType.MANDATORY);
+        int fuelId = repository.findOrCreateCategory("Fuel", "Auto/Fuel", autoId, 2, CategoryType.MANDATORY);
+        repository.markRollup(autoId);
+        service.updateMasterCategory(autoId, true);
+
+        YearMonth month = YearMonth.of(2026, Month.APRIL);
+        repository.upsertMonthlyBudget(month, autoId, 300.0);
+        repository.upsertMonthlyActual(month, fuelId, 90.0);
+
+        service.updateBalance(month, autoId, 500.0);
+
+        BudgetLine parent = findLine(service.loadMonth(month).mandatory(), autoId);
+        double storedOverride = repository.getMonthlyBalanceOverrides(month).get(autoId);
+
+        assertEquals(500.0, parent.balance());
+        assertEquals(290.0, storedOverride);
+    }
+
+    @Test
+    void leafCategoryCannotBecomeMasterCategory() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int leafId = repository.findOrCreateCategory("Fuel", "Fuel", null, 1, CategoryType.MANDATORY);
+
+        assertThrows(IllegalArgumentException.class, () -> service.updateMasterCategory(leafId, true));
     }
 
     private BudgetLine findLine(java.util.List<BudgetLine> lines, int categoryId) {
