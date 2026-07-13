@@ -105,6 +105,62 @@ class BudgetViewControllerTest {
         assertFalse(BudgetViewController.shouldOfferMasterToggle(leafRow, leafItem));
     }
 
+    @Test
+    void deleteCategoryIsDisabledForParentRows() {
+        BudgetTableRow parentRow = row(30, 0, 0.0, 0.0, 0.0, 0.0, false, false);
+        TreeItem<BudgetTableRow> parentItem = new TreeItem<>(parentRow);
+        parentItem.getChildren().add(new TreeItem<>(row(31, 1, 0.0, 0.0, 0.0, 0.0)));
+
+        BudgetTableRow leafRow = row(32, 0, 0.0, 0.0, 0.0, 0.0, false, false);
+        TreeItem<BudgetTableRow> leafItem = new TreeItem<>(leafRow);
+
+        assertFalse(BudgetViewController.isDeleteCategoryEnabled(parentItem));
+        assertTrue(BudgetViewController.isDeleteCategoryEnabled(leafItem));
+    }
+
+    @Test
+    void addChildCategoryIsNotAvailableForIncomeRows() {
+        BudgetTableRow incomeRow = new BudgetTableRow(new BudgetLine(
+            40,
+            "Income",
+            0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            CategoryType.INCOME,
+            false,
+            false,
+            false,
+            false
+        ));
+
+        BudgetTableRow mandatoryRow = row(41, 0, 0.0, 0.0, 0.0, 0.0);
+
+        assertFalse(BudgetViewController.canAddChildCategory(incomeRow));
+        assertTrue(BudgetViewController.canAddChildCategory(mandatoryRow));
+    }
+
+    @Test
+    void addParentCategoryIsAvailableForIncomeRows() {
+        BudgetTableRow incomeRow = new BudgetTableRow(new BudgetLine(
+            42,
+            "Income",
+            0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            CategoryType.INCOME,
+            false,
+            false,
+            false,
+            false
+        ));
+
+        assertTrue(BudgetViewController.canAddParentCategory(incomeRow));
+    }
+
     private BudgetTableRow row(int id, int depth, double actual, double budget, double diff, double balance) {
         return row(id, depth, actual, budget, diff, balance, false, false);
     }

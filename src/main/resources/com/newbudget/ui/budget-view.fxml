@@ -47,6 +47,7 @@
                         <ComboBox fx:id="monthPicker" styleClass="month-picker" />
                         <CheckBox fx:id="showHiddenToggle" mnemonicParsing="false" styleClass="show-hidden-toggle" text="Show Hidden" />
                         <Button mnemonicParsing="false" onAction="#onImportCsv" styleClass="action-button" text="Import Actuals CSV" />
+                        <Button mnemonicParsing="false" onAction="#onAddCategory" styleClass="action-button" text="Add Category" />
                         <Button mnemonicParsing="false" onAction="#onUseCurrentMonth" styleClass="secondary-button" text="Use Current Month" />
                         <GridPane styleClass="summary-grid">
                             <columnConstraints>

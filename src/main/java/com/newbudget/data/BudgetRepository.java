@@ -578,6 +578,198 @@ public class BudgetRepository {
         return months;
     }
 
+    public List<YearMonth> getAvailableMonthsOnOrAfter(YearMonth month) {
+        String sql = """
+            SELECT month FROM (
+                SELECT DISTINCT month FROM monthly_actuals
+                UNION
+                SELECT DISTINCT month FROM monthly_budgets
+                UNION
+                SELECT DISTINCT month FROM monthly_classifications
+                UNION
+                SELECT DISTINCT month FROM monthly_balance_overrides
+                UNION
+                SELECT DISTINCT month FROM monthly_hidden_categories
+            )
+            WHERE month >= ?
+            ORDER BY month
+            """;
+        List<YearMonth> months = new ArrayList<>();
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, toMonthKey(month));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    months.add(YearMonth.parse(resultSet.getString("month"), MONTH_FORMAT));
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to load months on or after " + month, e);
+        }
+        return months;
+    }
+
+    public Optional<CategoryRecord> getCategoryById(int categoryId) {
+        String sql = """
+            SELECT id, name, path, parent_id, sort_order, default_type, is_rollup, is_master
+            FROM categories
+            WHERE id = ?
+            """;
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, categoryId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return Optional.empty();
+                }
+                Integer parentId = resultSet.getObject("parent_id") == null
+                    ? null
+                    : resultSet.getInt("parent_id");
+                return Optional.of(new CategoryRecord(
+                    resultSet.getInt("id"),
+                    resultSet.getString("name"),
+                    resultSet.getString("path"),
+                    parentId,
+                    resultSet.getInt("sort_order"),
+                    CategoryType.fromDb(resultSet.getString("default_type")),
+                    resultSet.getInt("is_rollup") == 1,
+                    resultSet.getInt("is_master") == 1,
+                    false
+                ));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to load category " + categoryId, e);
+        }
+    }
+
+    public List<Integer> getDirectChildIds(int categoryId) {
+        String sql = "SELECT id FROM categories WHERE parent_id = ? ORDER BY sort_order, id";
+        List<Integer> childIds = new ArrayList<>();
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, categoryId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    childIds.add(resultSet.getInt("id"));
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to load child categories", e);
+        }
+        return childIds;
+    }
+
+    public int getNextSiblingSortOrder(Integer parentId) {
+        String sql = parentId == null
+            ? "SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_sort_order FROM categories WHERE parent_id IS NULL"
+            : "SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_sort_order FROM categories WHERE parent_id = ?";
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            if (parentId != null) {
+                statement.setInt(1, parentId);
+            }
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getInt("next_sort_order") : 1;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to compute next sort order", e);
+        }
+    }
+
+    public boolean categoryNameExistsUnderParent(Integer parentId, String name) {
+        String sql = parentId == null
+            ? "SELECT EXISTS(SELECT 1 FROM categories WHERE parent_id IS NULL AND LOWER(name) = LOWER(?)) AS exists_row"
+            : "SELECT EXISTS(SELECT 1 FROM categories WHERE parent_id = ? AND LOWER(name) = LOWER(?)) AS exists_row";
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            if (parentId == null) {
+                statement.setString(1, name);
+            } else {
+                statement.setInt(1, parentId);
+                statement.setString(2, name);
+            }
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt("exists_row") == 1;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to check category name uniqueness", e);
+        }
+    }
+
+    public int createCategory(String name, String path, Integer parentId, CategoryType defaultType) {
+        if (categoryNameExistsUnderParent(parentId, name)) {
+            throw new IllegalArgumentException("A category with that name already exists here.");
+        }
+
+        int sortOrder = getNextSiblingSortOrder(parentId);
+        String sql = """
+            INSERT INTO categories(name, path, parent_id, sort_order, default_type, is_rollup)
+            VALUES (?, ?, ?, ?, ?, 0)
+            """;
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, name);
+            statement.setString(2, path);
+            if (parentId == null) {
+                statement.setNull(3, java.sql.Types.INTEGER);
+            } else {
+                statement.setInt(3, parentId);
+            }
+            statement.setInt(4, sortOrder);
+            statement.setString(5, defaultType.name());
+            statement.executeUpdate();
+
+            try (ResultSet keys = statement.getGeneratedKeys()) {
+                if (keys.next()) {
+                    return keys.getInt(1);
+                }
+            }
+        } catch (SQLException e) {
+            if (e.getMessage() != null && e.getMessage().contains("UNIQUE")) {
+                throw new IllegalArgumentException("A category with that name already exists here.");
+            }
+            throw new IllegalStateException("Failed to create category", e);
+        }
+
+        throw new IllegalStateException("Failed to create category, no key returned");
+    }
+
+    public void deleteLeafCategory(int categoryId) {
+        CategoryRecord category = getCategoryById(categoryId)
+            .orElseThrow(() -> new IllegalArgumentException("Category not found."));
+        if (categoryHasChildren(categoryId)) {
+            throw new IllegalArgumentException("Cannot delete a category that has subcategories.");
+        }
+
+        try (Connection connection = Database.getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                executeCategoryDelete(connection, "DELETE FROM monthly_actuals WHERE category_id = ?", categoryId);
+                executeCategoryDelete(connection, "DELETE FROM monthly_budgets WHERE category_id = ?", categoryId);
+                executeCategoryDelete(connection, "DELETE FROM monthly_classifications WHERE category_id = ?", categoryId);
+                executeCategoryDelete(connection, "DELETE FROM monthly_balance_overrides WHERE category_id = ?", categoryId);
+                executeCategoryDelete(connection, "DELETE FROM monthly_hidden_categories WHERE category_id = ?", categoryId);
+
+                try (PreparedStatement deleteCategory = connection.prepareStatement("DELETE FROM categories WHERE id = ?")) {
+                    deleteCategory.setInt(1, categoryId);
+                    deleteCategory.executeUpdate();
+                }
+
+                if (category.parentId() != null) {
+                    refreshRollupFlag(connection, category.parentId());
+                }
+                connection.commit();
+            } catch (SQLException e) {
+                connection.rollback();
+                throw e;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to delete category", e);
+        }
+    }
+
     public CategoryType getCategoryDefaultType(int categoryId) {
         String sql = "SELECT default_type FROM categories WHERE id = ?";
         try (Connection connection = Database.getConnection();
@@ -704,6 +896,13 @@ public class BudgetRepository {
         }
     }
 
+    private void executeCategoryDelete(Connection connection, String sql, int categoryId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, categoryId);
+            statement.executeUpdate();
+        }
+    }
+
     private void removeOrphanCategories(Connection connection) throws SQLException {
         String deleteOrphansSql = """
             DELETE FROM categories
@@ -729,6 +928,24 @@ public class BudgetRepository {
                 deleted = statement.executeUpdate();
             }
         } while (deleted > 0);
+    }
+
+    private void refreshRollupFlag(Connection connection, int categoryId) throws SQLException {
+        boolean hasChildren;
+        try (PreparedStatement checkChildren = connection.prepareStatement(
+            "SELECT EXISTS(SELECT 1 FROM categories WHERE parent_id = ?) AS has_children"
+        )) {
+            checkChildren.setInt(1, categoryId);
+            try (ResultSet resultSet = checkChildren.executeQuery()) {
+                hasChildren = resultSet.next() && resultSet.getInt("has_children") == 1;
+            }
+        }
+
+        try (PreparedStatement update = connection.prepareStatement("UPDATE categories SET is_rollup = ? WHERE id = ?")) {
+            update.setInt(1, hasChildren ? 1 : 0);
+            update.setInt(2, categoryId);
+            update.executeUpdate();
+        }
     }
 
     public static String toMonthKey(YearMonth month) {

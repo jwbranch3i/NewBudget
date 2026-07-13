@@ -15,10 +15,16 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.Dialog;
+import javafx.scene.control.DialogPane;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContextMenu;
+import javafx.scene.control.ChoiceDialog;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.TextInputDialog;
+import javafx.scene.control.TextField;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableCell;
 import javafx.scene.control.TreeTableColumn;
@@ -40,6 +46,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.function.Consumer;
 import java.util.function.ToDoubleFunction;
 
@@ -316,6 +323,166 @@ public class BudgetViewController {
         } catch (Exception ex) {
             showError("Import failed", ex.getMessage());
         }
+    }
+
+    @FXML
+    private void onAddCategory() {
+        if (selectedMonth == null) {
+            showInfo("No Month Selected", "Select a month before adding categories.");
+            return;
+        }
+
+        Optional<NewCategoryInput> input = promptForNewCategoryInput();
+        if (input.isEmpty()) {
+            return;
+        }
+
+        NewCategoryInput value = input.get();
+        Integer parentId = value.isParent() ? null : value.parent().id();
+        CategoryType sectionType = value.isParent() ? value.parentType() : null;
+
+        try {
+            budgetService.addCategory(selectedMonth, value.name(), parentId, sectionType);
+            loadMonth(selectedMonth);
+            String target = value.isParent()
+                ? "as " + value.parentType().name().charAt(0) + value.parentType().name().substring(1).toLowerCase(Locale.ROOT)
+                : "under \"" + value.parent().label() + "\"";
+            statusLabel.setText("Added category \"" + value.name() + "\" " + target + " for " + MONTH_DISPLAY.format(selectedMonth));
+        } catch (IllegalArgumentException ex) {
+            showError("Add Category Failed", ex.getMessage());
+        } catch (Exception ex) {
+            showError("Add Category Failed", "Unable to add category.");
+        }
+    }
+
+    private Optional<NewCategoryInput> promptForNewCategoryInput() {
+        List<com.newbudget.model.CategoryRecord> allCategories = repository.getAllCategories();
+        java.util.Set<Integer> parentCategoryIds = allCategories.stream()
+            .map(com.newbudget.model.CategoryRecord::parentId)
+            .filter(java.util.Objects::nonNull)
+            .collect(Collectors.toSet());
+
+        List<ParentOption> availableParents = allCategories.stream()
+            .filter(category -> category.parentId() == null || parentCategoryIds.contains(category.id()))
+            .filter(category -> category.defaultType() != CategoryType.INCOME)
+            .sorted((left, right) -> {
+                int leftDepth = left.path().split("/").length;
+                int rightDepth = right.path().split("/").length;
+                if (leftDepth != rightDepth) {
+                    return Integer.compare(leftDepth, rightDepth);
+                }
+                return left.path().compareToIgnoreCase(right.path());
+            })
+            .map(category -> {
+                String[] segments = category.path().split("/");
+                int depth = Math.max(0, segments.length - 1);
+                String indent = "  ".repeat(depth);
+                return new ParentOption(category.id(), indent + category.name());
+            })
+            .collect(Collectors.toList());
+
+        Dialog<NewCategoryInput> dialog = new Dialog<>();
+        dialog.setTitle("Add Category");
+        dialog.setHeaderText("Enter category details");
+
+        DialogPane pane = dialog.getDialogPane();
+        pane.getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        TextField nameField = new TextField();
+        nameField.setPromptText("Category name");
+
+        CheckBox parentCheckBox = new CheckBox("Category is a parent");
+        parentCheckBox.setSelected(true);
+
+        ComboBox<CategoryType> parentTypeBox = new ComboBox<>();
+        parentTypeBox.setItems(FXCollections.observableArrayList(CategoryType.INCOME, CategoryType.MANDATORY, CategoryType.DISCRETIONARY));
+        parentTypeBox.setValue(CategoryType.MANDATORY);
+
+        ComboBox<ParentOption> parentBox = new ComboBox<>(FXCollections.observableArrayList(availableParents));
+        parentBox.setCellFactory(list -> new ListCell<>() {
+            @Override
+            protected void updateItem(ParentOption item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.label());
+            }
+        });
+        parentBox.setButtonCell(new ListCell<>() {
+            @Override
+            protected void updateItem(ParentOption item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.label());
+            }
+        });
+        if (!availableParents.isEmpty()) {
+            parentBox.getSelectionModel().selectFirst();
+        }
+
+        Label parentTypeLabel = new Label("Parent section:");
+        Label parentListLabel = new Label("Place under parent:");
+
+        Runnable refreshControlState = () -> {
+            boolean isParent = parentCheckBox.isSelected();
+            parentTypeLabel.setDisable(!isParent);
+            parentTypeBox.setDisable(!isParent);
+
+            parentListLabel.setDisable(isParent);
+            parentBox.setDisable(isParent);
+        };
+        parentCheckBox.selectedProperty().addListener((obs, oldValue, newValue) -> refreshControlState.run());
+        refreshControlState.run();
+
+        javafx.scene.layout.GridPane grid = new javafx.scene.layout.GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.add(parentCheckBox, 0, 0, 2, 1);
+        grid.add(parentTypeLabel, 0, 1);
+        grid.add(parentTypeBox, 1, 1);
+        grid.add(parentListLabel, 0, 2);
+        grid.add(parentBox, 1, 2);
+        grid.addRow(3, new Label("Category name:"), nameField);
+
+        pane.setContent(grid);
+
+        javafx.scene.Node okButton = pane.lookupButton(ButtonType.OK);
+        okButton.addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
+            String name = nameField.getText() == null ? "" : nameField.getText().trim();
+            if (name.isBlank()) {
+                showError("Add Category Failed", "Category name cannot be blank.");
+                event.consume();
+                return;
+            }
+
+            if (parentCheckBox.isSelected() && parentTypeBox.getValue() == null) {
+                showError("Add Category Failed", "Select a section for the parent category.");
+                event.consume();
+                return;
+            }
+
+            if (!parentCheckBox.isSelected() && parentBox.getSelectionModel().getSelectedItem() == null) {
+                showError("Add Category Failed", "Select a parent category.");
+                event.consume();
+            }
+        });
+
+        dialog.setResultConverter(button -> {
+            if (button != ButtonType.OK) {
+                return null;
+            }
+
+            String name = nameField.getText().trim();
+            boolean isParent = parentCheckBox.isSelected();
+            CategoryType parentType = isParent ? parentTypeBox.getValue() : null;
+            ParentOption parent = isParent ? null : parentBox.getSelectionModel().getSelectedItem();
+            return new NewCategoryInput(name, isParent, parentType, parent);
+        });
+
+        return dialog.showAndWait();
+    }
+
+    private record ParentOption(int id, String label) {
+    }
+
+    private record NewCategoryInput(String name, boolean isParent, CategoryType parentType, ParentOption parent) {
     }
 
     @FXML
@@ -624,9 +791,149 @@ public class BudgetViewController {
                 menuItems.add(moveItem);
             }
 
+            if (canAddChildCategory(newItem)) {
+                MenuItem addChildItem = new MenuItem("Add Child Category");
+                addChildItem.setOnAction(event -> onAddChildCategory(newItem));
+                menuItems.add(addChildItem);
+            }
+
+            if (canAddParentCategory(newItem)) {
+                MenuItem addParentItem = new MenuItem("Add Parent Category");
+                addParentItem.setOnAction(event -> onAddParentCategory());
+                menuItems.add(addParentItem);
+            }
+
+            if (treeItem != null) {
+                MenuItem deleteCategoryItem = new MenuItem("Delete Category");
+                deleteCategoryItem.setDisable(!isDeleteCategoryEnabled(treeItem));
+                deleteCategoryItem.setOnAction(event -> onDeleteCategory(newItem));
+                menuItems.add(deleteCategoryItem);
+            }
+
             row.setContextMenu(menuItems.isEmpty() ? null : new ContextMenu(menuItems.toArray(MenuItem[]::new)));
         });
         return row;
+    }
+
+    private void onAddChildCategory(BudgetTableRow parentRow) {
+        if (selectedMonth == null) {
+            showInfo("No Month Selected", "Select a month before adding categories.");
+            return;
+        }
+
+        Optional<String> name = promptForCategoryName(
+            "Add Child Category",
+            "Add child under " + parentRow.getCategory(),
+            "Enter child category name:"
+        );
+        if (name.isEmpty()) {
+            return;
+        }
+
+        try {
+            budgetService.addCategory(selectedMonth, name.get(), parentRow.getCategoryId(), null);
+            loadMonth(selectedMonth);
+            statusLabel.setText("Added child category \"" + name.get() + "\" for " + MONTH_DISPLAY.format(selectedMonth));
+        } catch (IllegalArgumentException ex) {
+            showError("Add Category Failed", ex.getMessage());
+        } catch (Exception ex) {
+            showError("Add Category Failed", "Unable to add category.");
+        }
+    }
+
+    private void onAddParentCategory() {
+        if (selectedMonth == null) {
+            showInfo("No Month Selected", "Select a month before adding categories.");
+            return;
+        }
+
+        Optional<CategoryType> sectionType = promptForParentSection();
+        if (sectionType.isEmpty()) {
+            return;
+        }
+
+        Optional<String> name = promptForCategoryName(
+            "Add Parent Category",
+            "Create a new top-level category",
+            "Enter parent category name:"
+        );
+        if (name.isEmpty()) {
+            return;
+        }
+
+        try {
+            budgetService.addCategory(selectedMonth, name.get(), null, sectionType.get());
+            loadMonth(selectedMonth);
+            statusLabel.setText("Added parent category \"" + name.get() + "\" for " + MONTH_DISPLAY.format(selectedMonth));
+        } catch (IllegalArgumentException ex) {
+            showError("Add Category Failed", ex.getMessage());
+        } catch (Exception ex) {
+            showError("Add Category Failed", "Unable to add category.");
+        }
+    }
+
+    private void onDeleteCategory(BudgetTableRow row) {
+        if (selectedMonth == null) {
+            showInfo("No Month Selected", "Select a month before deleting categories.");
+            return;
+        }
+
+        boolean confirmed = confirmAction(
+            "Delete Category",
+            "Delete \"" + row.getCategory() + "\"?",
+            "This permanently deletes the category across all months.",
+            "Delete"
+        );
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            budgetService.deleteCategory(row.getCategoryId());
+            loadMonth(selectedMonth);
+            statusLabel.setText("Deleted category \"" + row.getCategory() + "\" for " + MONTH_DISPLAY.format(selectedMonth));
+        } catch (IllegalArgumentException ex) {
+            showError("Delete Category Failed", ex.getMessage());
+        } catch (Exception ex) {
+            showError("Delete Category Failed", "Unable to delete category.");
+        }
+    }
+
+    private Optional<String> promptForCategoryName(String title, String header, String content) {
+        TextInputDialog dialog = new TextInputDialog();
+        dialog.setTitle(title);
+        dialog.setHeaderText(header);
+        dialog.setContentText(content);
+        Optional<String> value = dialog.showAndWait().map(String::trim);
+        if (value.isPresent() && value.get().isBlank()) {
+            showError("Add Category Failed", "Category name cannot be blank.");
+            return Optional.empty();
+        }
+        return value.filter(v -> !v.isBlank());
+    }
+
+    private Optional<CategoryType> promptForParentSection() {
+        ChoiceDialog<String> dialog = new ChoiceDialog<>("Mandatory", List.of("Income", "Mandatory", "Discretionary"));
+        dialog.setTitle("Category Section");
+        dialog.setHeaderText("Choose section for new parent category");
+        dialog.setContentText("Section:");
+
+        Optional<String> selected = dialog.showAndWait();
+        if (selected.isEmpty()) {
+            return Optional.empty();
+        }
+
+        return Optional.of(parseParentSection(selected.get()));
+    }
+
+    private CategoryType parseParentSection(String section) {
+        if ("Income".equalsIgnoreCase(section)) {
+            return CategoryType.INCOME;
+        }
+        if ("Mandatory".equalsIgnoreCase(section)) {
+            return CategoryType.MANDATORY;
+        }
+        return CategoryType.DISCRETIONARY;
     }
 
     private void onShowHiddenToggled() {
@@ -691,6 +998,18 @@ public class BudgetViewController {
 
     static boolean shouldOfferMasterToggle(BudgetTableRow row, TreeItem<BudgetTableRow> treeItem) {
         return row != null && treeItem != null && !treeItem.getChildren().isEmpty();
+    }
+
+    static boolean canAddChildCategory(BudgetTableRow row) {
+        return row != null && row.getType() != CategoryType.INCOME;
+    }
+
+    static boolean canAddParentCategory(BudgetTableRow row) {
+        return row != null;
+    }
+
+    static boolean isDeleteCategoryEnabled(TreeItem<BudgetTableRow> treeItem) {
+        return treeItem != null && treeItem.getChildren().isEmpty();
     }
 
     private boolean canEditBudget(TreeItem<BudgetTableRow> treeItem) {

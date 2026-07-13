@@ -160,6 +160,58 @@ public class BudgetService {
         }
     }
 
+    public int addCategory(YearMonth month, String name, Integer parentId, CategoryType sectionType) {
+        if (month == null) {
+            throw new IllegalArgumentException("Month is required.");
+        }
+
+        String trimmedName = name == null ? "" : name.trim();
+        if (trimmedName.isBlank()) {
+            throw new IllegalArgumentException("Category name cannot be blank.");
+        }
+
+        CategoryType categoryType;
+        String path;
+        if (parentId == null) {
+            if (sectionType == null) {
+                throw new IllegalArgumentException("Category section is required.");
+            }
+            categoryType = sectionType;
+            path = trimmedName;
+        } else {
+            CategoryRecord parent = repository.getCategoryById(parentId)
+                .orElseThrow(() -> new IllegalArgumentException("Parent category not found."));
+            repository.ensureMonthlyClassificationsFromDefaults(month);
+            CategoryType parentType = repository.getMonthlyClassifications(month)
+                .getOrDefault(parent.id(), parent.defaultType());
+            if (parentType == CategoryType.INCOME) {
+                throw new IllegalArgumentException("New categories must be Mandatory or Discretionary.");
+            }
+            categoryType = parentType;
+            path = parent.path() + "/" + trimmedName;
+        }
+
+        int categoryId = repository.createCategory(trimmedName, path, parentId, categoryType);
+        if (parentId != null) {
+            repository.markRollup(parentId);
+        }
+
+        TreeSet<YearMonth> seedMonths = new TreeSet<>(repository.getAvailableMonthsOnOrAfter(month));
+        seedMonths.add(month);
+        for (YearMonth seedMonth : seedMonths) {
+            repository.setMonthlyClassification(seedMonth, categoryId, categoryType);
+            if (!repository.getMonthlyBudgets(seedMonth).containsKey(categoryId)) {
+                repository.upsertMonthlyBudget(seedMonth, categoryId, 0.0);
+            }
+        }
+
+        return categoryId;
+    }
+
+    public void deleteCategory(int categoryId) {
+        repository.deleteLeafCategory(categoryId);
+    }
+
     public void deleteMonthData(YearMonth month) {
         repository.deleteMonthData(month);
     }
