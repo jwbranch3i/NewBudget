@@ -2,17 +2,20 @@ package com.newbudget.ui;
 
 import com.newbudget.data.BudgetRepository;
 import com.newbudget.data.CsvActualImporter;
+import com.newbudget.model.AccountRecord;
 import com.newbudget.model.CategoryType;
 import com.newbudget.model.MonthSnapshot;
 import com.newbudget.service.BudgetService;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleStringProperty;
+import javafx.fxml.FXMLLoader;
 import javafx.collections.ListChangeListener;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonBar;
+import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Dialog;
@@ -31,6 +34,8 @@ import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableRow;
 import javafx.scene.control.TreeTableView;
 import javafx.scene.control.cell.TextFieldTreeTableCell;
+import javafx.scene.Parent;
+import javafx.scene.Scene;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.util.StringConverter;
@@ -65,6 +70,8 @@ public class BudgetViewController {
     private Stage stage;
     private YearMonth selectedMonth;
     private boolean updatingMonthPicker;
+    private Integer accountId;
+    private String accountName;
 
     @FXML
     private ComboBox<YearMonth> monthPicker;
@@ -75,6 +82,12 @@ public class BudgetViewController {
 
     @FXML
     private CheckBox showHiddenToggle;
+
+    @FXML
+    private Button createAccountButton;
+
+    @FXML
+    private Button openAccountButton;
 
     @FXML
     private TreeTableView<BudgetTableRow> incomeTable;
@@ -234,13 +247,40 @@ public class BudgetViewController {
         BudgetService budgetService,
         CsvActualImporter csvActualImporter
     ) {
+        initializeCommon(stage, repository, budgetService, csvActualImporter, null, null);
+    }
+
+    public void initializeAccountWindow(
+        Stage stage,
+        BudgetRepository repository,
+        BudgetService budgetService,
+        CsvActualImporter csvActualImporter,
+        AccountRecord account
+    ) {
+        initializeCommon(stage, repository, budgetService, csvActualImporter, account.id(), account.name());
+    }
+
+    private void initializeCommon(
+        Stage stage,
+        BudgetRepository repository,
+        BudgetService budgetService,
+        CsvActualImporter csvActualImporter,
+        Integer accountId,
+        String accountName
+    ) {
         this.stage = stage;
         this.repository = repository;
         this.budgetService = budgetService;
         this.csvActualImporter = csvActualImporter;
+        this.accountId = accountId;
+        this.accountName = accountName;
         YearMonth currentMonth = YearMonth.now(ZoneId.systemDefault());
         this.selectedMonth = determineInitialMonth(currentMonth, repository.getAvailableMonths());
+        if (this.stage != null && this.accountName != null) {
+            this.stage.setTitle("NewBudget - " + this.accountName);
+        }
         refreshMonths();
+        updateWindowModeControls();
         selectMonth(selectedMonth, false);
     }
 
@@ -353,6 +393,41 @@ public class BudgetViewController {
         } catch (Exception ex) {
             showError("Add Category Failed", "Unable to add category.");
         }
+    }
+
+    @FXML
+    private void onCreateAccount() {
+        Optional<String> name = promptForAccountName();
+        if (name.isEmpty()) {
+            return;
+        }
+
+        try {
+            int createdAccountId = budgetService.createAccount(name.get());
+            statusLabel.setText("Created account \"" + name.get() + "\".");
+            budgetService.getAccounts().stream()
+                .filter(account -> account.id() == createdAccountId)
+                .findFirst()
+                .ifPresent(this::openAccountWindow);
+        } catch (IllegalArgumentException ex) {
+            showError("Create Account Failed", ex.getMessage());
+        } catch (Exception ex) {
+            showError("Create Account Failed", "Unable to create account.");
+        }
+    }
+
+    @FXML
+    private void onOpenAccount() {
+        List<AccountRecord> accounts = budgetService.getAccounts();
+        if (accounts.isEmpty()) {
+            showInfo("No Accounts", "Create an account before opening one.");
+            return;
+        }
+
+        Optional<AccountRecord> selectedAccount = accounts.size() == 1
+            ? Optional.of(accounts.get(0))
+            : promptForAccountSelection(accounts, "Open Account", "Select an account to open");
+        selectedAccount.ifPresent(this::openAccountWindow);
     }
 
     private Optional<NewCategoryInput> promptForNewCategoryInput() {
@@ -804,6 +879,12 @@ public class BudgetViewController {
             }
 
             if (treeItem != null) {
+                if (canAssignCategoryToAccount(newItem)) {
+                    MenuItem addToAccountItem = new MenuItem("Add to Account");
+                    addToAccountItem.setOnAction(event -> onAssignCategoryToAccount(newItem));
+                    menuItems.add(addToAccountItem);
+                }
+
                 MenuItem deleteCategoryItem = new MenuItem("Delete Category");
                 deleteCategoryItem.setDisable(!isDeleteCategoryEnabled(treeItem));
                 deleteCategoryItem.setOnAction(event -> onDeleteCategory(newItem));
@@ -838,6 +919,30 @@ public class BudgetViewController {
             showError("Add Category Failed", ex.getMessage());
         } catch (Exception ex) {
             showError("Add Category Failed", "Unable to add category.");
+        }
+    }
+
+    private void onAssignCategoryToAccount(BudgetTableRow row) {
+        List<AccountRecord> accounts = budgetService.getAccounts();
+        if (accounts.isEmpty()) {
+            showInfo("No Accounts", "Create an account before assigning categories.");
+            return;
+        }
+
+        Optional<AccountRecord> targetAccount = accounts.size() == 1
+            ? Optional.of(accounts.get(0))
+            : promptForAccountSelection(accounts, "Assign Account", "Assign \"" + row.getCategory() + "\" to an account");
+        if (targetAccount.isEmpty()) {
+            return;
+        }
+
+        try {
+            budgetService.assignCategoryToAccount(targetAccount.get().id(), row.getCategoryId());
+            statusLabel.setText("Assigned \"" + row.getCategory() + "\" to account \"" + targetAccount.get().name() + "\".");
+        } catch (IllegalArgumentException ex) {
+            showError("Assign Account Failed", ex.getMessage());
+        } catch (Exception ex) {
+            showError("Assign Account Failed", "Unable to assign category to account.");
         }
     }
 
@@ -910,6 +1015,47 @@ public class BudgetViewController {
             return Optional.empty();
         }
         return value.filter(v -> !v.isBlank());
+    }
+
+    private Optional<String> promptForAccountName() {
+        TextInputDialog dialog = new TextInputDialog();
+        dialog.setTitle("Create Account");
+        dialog.setHeaderText("Create a new account");
+        dialog.setContentText("Account name:");
+
+        Optional<String> value = dialog.showAndWait().map(String::trim);
+        if (value.isPresent() && value.get().isBlank()) {
+            showError("Create Account Failed", "Account name cannot be blank.");
+            return Optional.empty();
+        }
+        return value.filter(v -> !v.isBlank());
+    }
+
+    private Optional<AccountRecord> promptForAccountSelection(List<AccountRecord> accounts, String title, String header) {
+        ChoiceDialog<AccountRecord> dialog = new ChoiceDialog<>(accounts.get(0), accounts);
+        dialog.setTitle(title);
+        dialog.setHeaderText(header);
+        dialog.setContentText("Account:");
+        return dialog.showAndWait();
+    }
+
+    private void openAccountWindow(AccountRecord account) {
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/com/newbudget/ui/budget-view.fxml"));
+            Parent root = loader.load();
+            BudgetViewController controller = loader.getController();
+
+            Stage accountStage = new Stage();
+            controller.initializeAccountWindow(accountStage, repository, budgetService, csvActualImporter, account);
+
+            Scene scene = new Scene(root, 1600, 900);
+            scene.getStylesheets().add(getClass().getResource("/com/newbudget/ui/styles.css").toExternalForm());
+            accountStage.setTitle("NewBudget - " + account.name());
+            accountStage.setScene(scene);
+            accountStage.show();
+        } catch (Exception ex) {
+            showError("Open Account Failed", "Unable to open account window.");
+        }
     }
 
     private Optional<CategoryType> promptForParentSection() {
@@ -1040,6 +1186,10 @@ public class BudgetViewController {
 
     private static BudgetTableRow getCurrentRow(TreeTableRow<BudgetTableRow> tableRow) {
         return tableRow == null ? null : tableRow.getItem();
+    }
+
+    static boolean canAssignCategoryToAccount(BudgetTableRow row) {
+        return row != null && row.getDepth() == 0;
     }
 
     private void initializeTotals() {
@@ -1294,7 +1444,9 @@ public class BudgetViewController {
     private void loadMonth(YearMonth month) {
         try {
             boolean includeHidden = showHiddenToggle.isSelected();
-            MonthSnapshot snapshot = budgetService.loadMonth(month, includeHidden);
+            MonthSnapshot snapshot = accountId == null
+                ? budgetService.loadMonth(month, includeHidden)
+                : budgetService.loadAccountMonth(accountId, month, includeHidden);
             List<BudgetTableRow> income = snapshot.income().stream().map(BudgetTableRow::new).toList();
             List<BudgetTableRow> mandatory = snapshot.mandatory().stream().map(BudgetTableRow::new).toList();
             List<BudgetTableRow> discretionary = snapshot.discretionary().stream().map(BudgetTableRow::new).toList();
@@ -1304,7 +1456,7 @@ public class BudgetViewController {
             applySection(discretionaryTable, discretionary);
             refreshTotalsAndSummaryFromTables();
 
-            selectedMonthLabel.setText(MONTH_DISPLAY.format(month));
+            selectedMonthLabel.setText(accountName == null ? MONTH_DISPLAY.format(month) : accountName + " • " + MONTH_DISPLAY.format(month));
             statusLabel.setText(
                 includeHidden
                     ? "Showing " + MONTH_DISPLAY.format(month) + " (including hidden categories)"
@@ -1312,6 +1464,18 @@ public class BudgetViewController {
             );
         } catch (Exception ex) {
             showError("Load failed", ex.getMessage());
+        }
+    }
+
+    private void updateWindowModeControls() {
+        boolean accountMode = accountId != null;
+        if (createAccountButton != null) {
+            createAccountButton.setVisible(!accountMode);
+            createAccountButton.setManaged(!accountMode);
+        }
+        if (openAccountButton != null) {
+            openAccountButton.setVisible(!accountMode);
+            openAccountButton.setManaged(!accountMode);
         }
     }
 

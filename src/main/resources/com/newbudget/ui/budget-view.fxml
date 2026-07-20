@@ -48,6 +48,8 @@
                         <CheckBox fx:id="showHiddenToggle" mnemonicParsing="false" styleClass="show-hidden-toggle" text="Show Hidden" />
                         <Button mnemonicParsing="false" onAction="#onImportCsv" styleClass="action-button" text="Import Actuals CSV" />
                         <Button mnemonicParsing="false" onAction="#onAddCategory" styleClass="action-button" text="Add Category" />
+                        <Button fx:id="createAccountButton" mnemonicParsing="false" onAction="#onCreateAccount" styleClass="action-button" text="Create Account" />
+                        <Button fx:id="openAccountButton" mnemonicParsing="false" onAction="#onOpenAccount" styleClass="action-button" text="Open Account" />
                         <Button mnemonicParsing="false" onAction="#onUseCurrentMonth" styleClass="secondary-button" text="Use Current Month" />
                         <GridPane styleClass="summary-grid">
                             <columnConstraints>

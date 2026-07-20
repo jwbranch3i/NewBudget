@@ -2,8 +2,10 @@ package com.newbudget.service;
 
 import com.newbudget.data.BudgetRepository;
 import com.newbudget.data.Database;
+import com.newbudget.model.AccountRecord;
 import com.newbudget.model.BudgetLine;
 import com.newbudget.model.CategoryType;
+import com.newbudget.model.MonthSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;
@@ -16,6 +18,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertIterableEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -475,6 +478,90 @@ class BudgetServiceTest {
     }
 
     @Test
+    void createdAccountsAreReturnedAlphabetically() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        service.createAccount("To John");
+        service.createAccount("Savings");
+
+        assertIterableEquals(
+            java.util.List.of("Savings", "To John"),
+            service.getAccounts().stream().map(AccountRecord::name).toList()
+        );
+    }
+
+    @Test
+    void assigningChildCategoryToAccountIsRejected() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int accountId = service.createAccount("To John");
+        int parentId = repository.findOrCreateCategory("Auto", "Auto", null, 1, CategoryType.MANDATORY);
+        int childId = repository.findOrCreateCategory("Fuel", "Auto/Fuel", parentId, 2, CategoryType.MANDATORY);
+
+        IllegalArgumentException exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> service.assignCategoryToAccount(accountId, childId)
+        );
+
+        assertEquals("Only top-level categories can be assigned to an account.", exception.getMessage());
+    }
+
+    @Test
+    void assigningTopLevelCategoryToAccountPersistsAssignment() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int accountId = service.createAccount("To John");
+        int categoryId = repository.findOrCreateCategory("Savings", "Savings", null, 1, CategoryType.MANDATORY);
+
+        service.assignCategoryToAccount(accountId, categoryId);
+
+        assertEquals("To John", repository.getAssignedAccountForCategory(categoryId).orElseThrow().name());
+    }
+
+    @Test
+    void accountSnapshotIncludesAssignedSubtreeOnly() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int accountId = service.createAccount("To John");
+        int autoId = repository.findOrCreateCategory("Auto", "Auto", null, 1, CategoryType.MANDATORY);
+        int fuelId = repository.findOrCreateCategory("Fuel", "Auto/Fuel", autoId, 2, CategoryType.MANDATORY);
+        int groceriesId = repository.findOrCreateCategory("Groceries", "Groceries", null, 3, CategoryType.DISCRETIONARY);
+
+        service.assignCategoryToAccount(accountId, autoId);
+
+        YearMonth month = YearMonth.of(2026, Month.MARCH);
+        repository.upsertMonthlyBudget(month, autoId, 200.0);
+        repository.upsertMonthlyActual(month, autoId, 50.0);
+        repository.upsertMonthlyBudget(month, fuelId, 100.0);
+        repository.upsertMonthlyActual(month, fuelId, 25.0);
+        repository.upsertMonthlyBudget(month, groceriesId, 300.0);
+        repository.upsertMonthlyActual(month, groceriesId, 280.0);
+
+        MonthSnapshot accountSnapshot = service.loadAccountMonth(accountId, month, true);
+        BudgetLine autoLine = findLine(accountSnapshot.mandatory(), autoId);
+
+        assertEquals(300.0, autoLine.budgetAmount());
+        assertEquals(75.0, autoLine.actualAmount());
+        assertTrue(accountSnapshot.discretionary().stream().noneMatch(line -> line.categoryId() == groceriesId));
+    }
+
+    @Test
     void deletingParentWithChildrenThrowsExpectedException() {
         Database.initialize();
         resetDatabase();
@@ -523,6 +610,8 @@ class BudgetServiceTest {
             statement.execute("DELETE FROM monthly_actuals");
             statement.execute("DELETE FROM monthly_balance_overrides");
             statement.execute("DELETE FROM monthly_hidden_categories");
+            statement.execute("DELETE FROM account_category_assignments");
+            statement.execute("DELETE FROM accounts");
             statement.execute("DELETE FROM categories");
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to reset test database", e);

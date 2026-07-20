@@ -1,6 +1,7 @@
 package com.newbudget.service;
 
 import com.newbudget.model.BudgetLine;
+import com.newbudget.model.AccountRecord;
 import com.newbudget.model.CategoryRecord;
 import com.newbudget.model.CategoryType;
 import com.newbudget.model.MonthSnapshot;
@@ -12,9 +13,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -30,9 +31,23 @@ public class BudgetService {
     }
 
     public MonthSnapshot loadMonth(YearMonth month, boolean includeHidden) {
+        return loadMonth(month, includeHidden, null);
+    }
+
+    public MonthSnapshot loadAccountMonth(int accountId, YearMonth month, boolean includeHidden) {
+        return loadMonth(month, includeHidden, resolveAccountCategoryIds(accountId));
+    }
+
+    private MonthSnapshot loadMonth(YearMonth month, boolean includeHidden, Set<Integer> allowedCategoryIds) {
         repository.ensureMonthlyClassificationsFromDefaults(month);
 
         List<CategoryRecord> categories = repository.getAllCategories();
+        if (allowedCategoryIds != null) {
+            categories = categories.stream()
+                .filter(category -> allowedCategoryIds.contains(category.id()))
+                .toList();
+        }
+
         Map<Integer, Double> monthlyActuals = repository.getMonthlyActuals(month);
         Map<Integer, Double> monthlyBudgets = repository.getMonthlyBudgets(month);
         Map<Integer, Double> effectiveBalances = computeEffectiveBalances(month, categories);
@@ -158,6 +173,50 @@ public class BudgetService {
         for (Integer id : collectSubtreeCategoryIds(categoryId, childrenByParentId)) {
             repository.setMonthlyHidden(month, id, hidden);
         }
+    }
+
+    public int createAccount(String name) {
+        return repository.createAccount(name);
+    }
+
+    public List<AccountRecord> getAccounts() {
+        return repository.getAccounts();
+    }
+
+    public void assignCategoryToAccount(int accountId, int categoryId) {
+        CategoryRecord category = repository.getCategoryById(categoryId)
+            .orElseThrow(() -> new IllegalArgumentException("Category not found."));
+        if (category.parentId() != null) {
+            throw new IllegalArgumentException("Only top-level categories can be assigned to an account.");
+        }
+
+        boolean accountExists = repository.getAccounts().stream().anyMatch(account -> account.id() == accountId);
+        if (!accountExists) {
+            throw new IllegalArgumentException("Account not found.");
+        }
+
+        repository.assignCategoryToAccount(accountId, categoryId);
+    }
+
+    private Set<Integer> resolveAccountCategoryIds(int accountId) {
+        Set<Integer> assignedIds = repository.getAssignedCategoryIdsForAccount(accountId);
+        if (assignedIds.isEmpty()) {
+            return Set.of();
+        }
+
+        List<CategoryRecord> categories = repository.getAllCategories();
+        Map<Integer, List<Integer>> childrenByParentId = new HashMap<>();
+        for (CategoryRecord category : categories) {
+            if (category.parentId() != null) {
+                childrenByParentId.computeIfAbsent(category.parentId(), ignored -> new ArrayList<>()).add(category.id());
+            }
+        }
+
+        Set<Integer> allowedIds = new HashSet<>();
+        for (Integer rootId : assignedIds) {
+            allowedIds.addAll(collectSubtreeCategoryIds(rootId, childrenByParentId));
+        }
+        return allowedIds;
     }
 
     public int addCategory(YearMonth month, String name, Integer parentId, CategoryType sectionType) {

@@ -33,6 +33,8 @@ class BudgetRepositoryCategoryLifecycleTest {
         repository.setMonthlyClassification(april, categoryId, CategoryType.DISCRETIONARY);
         repository.upsertMonthlyBalanceOverride(april, categoryId, 44.0);
         repository.setMonthlyHidden(april, categoryId, true);
+        int accountId = repository.createAccount("To John");
+        repository.assignCategoryToAccount(accountId, categoryId);
 
         repository.deleteLeafCategory(categoryId);
 
@@ -43,6 +45,23 @@ class BudgetRepositoryCategoryLifecycleTest {
         assertFalse(repository.getMonthlyClassifications(april).containsKey(categoryId));
         assertFalse(repository.getMonthlyBalanceOverrides(april).containsKey(categoryId));
         assertFalse(repository.getMonthlyHiddenCategoryIds(april).contains(categoryId));
+        assertTrue(repository.getAssignedAccountForCategory(categoryId).isEmpty());
+    }
+
+    @Test
+    void createAccountRejectsDuplicateNameCaseInsensitive() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        repository.createAccount("To John");
+
+        IllegalArgumentException exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> repository.createAccount("to john")
+        );
+
+        assertEquals("An account with that name already exists.", exception.getMessage());
     }
 
     @Test
@@ -98,6 +117,8 @@ class BudgetRepositoryCategoryLifecycleTest {
             statement.execute("DELETE FROM monthly_actuals");
             statement.execute("DELETE FROM monthly_balance_overrides");
             statement.execute("DELETE FROM monthly_hidden_categories");
+            statement.execute("DELETE FROM account_category_assignments");
+            statement.execute("DELETE FROM accounts");
             statement.execute("DELETE FROM categories");
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to reset test database", e);

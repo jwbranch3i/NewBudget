@@ -1,5 +1,6 @@
 package com.newbudget.data;
 
+import com.newbudget.model.AccountRecord;
 import com.newbudget.model.CategoryRecord;
 import com.newbudget.model.CategoryType;
 
@@ -125,6 +126,101 @@ public class BudgetRepository {
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to clear monthly actuals", e);
+        }
+    }
+
+    public int createAccount(String name) {
+        String trimmedName = name == null ? "" : name.trim();
+        if (trimmedName.isBlank()) {
+            throw new IllegalArgumentException("Account name cannot be blank.");
+        }
+
+        String sql = "INSERT INTO accounts(name) VALUES (?)";
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, trimmedName);
+            statement.executeUpdate();
+
+            try (ResultSet keys = statement.getGeneratedKeys()) {
+                if (keys.next()) {
+                    return keys.getInt(1);
+                }
+            }
+        } catch (SQLException e) {
+            if (e.getMessage() != null && e.getMessage().contains("UNIQUE")) {
+                throw new IllegalArgumentException("An account with that name already exists.");
+            }
+            throw new IllegalStateException("Failed to create account", e);
+        }
+
+        throw new IllegalStateException("Failed to create account, no key returned");
+    }
+
+    public List<AccountRecord> getAccounts() {
+        String sql = "SELECT id, name FROM accounts ORDER BY LOWER(name), id";
+        List<AccountRecord> accounts = new ArrayList<>();
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                accounts.add(new AccountRecord(resultSet.getInt("id"), resultSet.getString("name")));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to load accounts", e);
+        }
+        return accounts;
+    }
+
+    public Optional<AccountRecord> getAssignedAccountForCategory(int categoryId) {
+        String sql = """
+            SELECT a.id, a.name
+            FROM accounts a
+            JOIN account_category_assignments aca ON aca.account_id = a.id
+            WHERE aca.category_id = ?
+            """;
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, categoryId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return Optional.empty();
+                }
+                return Optional.of(new AccountRecord(resultSet.getInt("id"), resultSet.getString("name")));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to load assigned account", e);
+        }
+    }
+
+    public Set<Integer> getAssignedCategoryIdsForAccount(int accountId) {
+        String sql = "SELECT category_id FROM account_category_assignments WHERE account_id = ?";
+        Set<Integer> categoryIds = new HashSet<>();
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, accountId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    categoryIds.add(resultSet.getInt("category_id"));
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to load account categories", e);
+        }
+        return categoryIds;
+    }
+
+    public void assignCategoryToAccount(int accountId, int categoryId) {
+        String sql = "INSERT INTO account_category_assignments(account_id, category_id) VALUES (?, ?)";
+        try (Connection connection = Database.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, accountId);
+            statement.setInt(2, categoryId);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            if (e.getMessage() != null && e.getMessage().contains("UNIQUE")) {
+                throw new IllegalArgumentException("That category is already assigned to an account.");
+            }
+            throw new IllegalStateException("Failed to assign category to account", e);
         }
     }
 
@@ -749,6 +845,7 @@ public class BudgetRepository {
                 executeCategoryDelete(connection, "DELETE FROM monthly_classifications WHERE category_id = ?", categoryId);
                 executeCategoryDelete(connection, "DELETE FROM monthly_balance_overrides WHERE category_id = ?", categoryId);
                 executeCategoryDelete(connection, "DELETE FROM monthly_hidden_categories WHERE category_id = ?", categoryId);
+                executeCategoryDelete(connection, "DELETE FROM account_category_assignments WHERE category_id = ?", categoryId);
 
                 try (PreparedStatement deleteCategory = connection.prepareStatement("DELETE FROM categories WHERE id = ?")) {
                     deleteCategory.setInt(1, categoryId);

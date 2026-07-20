@@ -161,6 +161,15 @@ class BudgetViewControllerTest {
         assertTrue(BudgetViewController.canAddParentCategory(incomeRow));
     }
 
+    @Test
+    void accountAssignmentIsAvailableOnlyForTopLevelRows() {
+        BudgetTableRow topLevelRow = row(50, 0, 0.0, 0.0, 0.0, 0.0);
+        BudgetTableRow childRow = row(51, 1, 0.0, 0.0, 0.0, 0.0);
+
+        assertTrue(BudgetViewController.canAssignCategoryToAccount(topLevelRow));
+        assertFalse(BudgetViewController.canAssignCategoryToAccount(childRow));
+    }
+
     private BudgetTableRow row(int id, int depth, double actual, double budget, double diff, double balance) {
         return row(id, depth, actual, budget, diff, balance, false, false);
     }
