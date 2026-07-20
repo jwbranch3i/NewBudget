@@ -866,18 +866,6 @@ public class BudgetViewController {
                 menuItems.add(moveItem);
             }
 
-            if (canAddChildCategory(newItem)) {
-                MenuItem addChildItem = new MenuItem("Add Child Category");
-                addChildItem.setOnAction(event -> onAddChildCategory(newItem));
-                menuItems.add(addChildItem);
-            }
-
-            if (canAddParentCategory(newItem)) {
-                MenuItem addParentItem = new MenuItem("Add Parent Category");
-                addParentItem.setOnAction(event -> onAddParentCategory());
-                menuItems.add(addParentItem);
-            }
-
             if (treeItem != null) {
                 if (canAssignCategoryToAccount(newItem)) {
                     MenuItem addToAccountItem = new MenuItem("Add to Account");
