@@ -4,7 +4,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
@@ -36,6 +38,8 @@ public final class Database {
                     FOREIGN KEY(parent_id) REFERENCES categories(id)
                 )
                 """);
+
+            ensureColumnExists(connection, "categories", "is_master", "INTEGER NOT NULL DEFAULT 0");
 
             statement.execute("""
                 CREATE TABLE IF NOT EXISTS monthly_actuals (
@@ -92,5 +96,19 @@ public final class Database {
 
     public static Connection getConnection() throws SQLException {
         return DriverManager.getConnection(JDBC_URL);
+    }
+
+    private static void ensureColumnExists(Connection connection, String tableName, String columnName, String definition)
+        throws SQLException {
+        DatabaseMetaData metaData = connection.getMetaData();
+        try (ResultSet columns = metaData.getColumns(null, null, tableName, columnName)) {
+            if (columns.next()) {
+                return;
+            }
+        }
+
+        try (Statement alterStatement = connection.createStatement()) {
+            alterStatement.execute("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + definition);
+        }
     }
 }

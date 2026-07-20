@@ -16,6 +16,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BudgetServiceTest {
@@ -293,6 +294,219 @@ class BudgetServiceTest {
         assertEquals(150.0, januaryBalance);
         assertEquals(300.0, februaryBalance);
         assertEquals(340.0, marchBalance);
+    }
+
+    @Test
+    void masterCategoryUsesParentBudgetAndChildActuals() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int autoId = repository.findOrCreateCategory("Auto", "Auto", null, 1, CategoryType.MANDATORY);
+        int fuelId = repository.findOrCreateCategory("Fuel", "Auto/Fuel", autoId, 2, CategoryType.MANDATORY);
+        int maintenanceId = repository.findOrCreateCategory("Maintenance", "Auto/Maintenance", autoId, 3, CategoryType.MANDATORY);
+        repository.markRollup(autoId);
+        service.updateMasterCategory(autoId, true);
+
+        YearMonth month = YearMonth.of(2026, Month.MARCH);
+        repository.upsertMonthlyBudget(month, autoId, 400.0);
+        repository.upsertMonthlyBudget(month, fuelId, 125.0);
+        repository.upsertMonthlyBudget(month, maintenanceId, 175.0);
+        repository.upsertMonthlyActual(month, fuelId, 80.0);
+        repository.upsertMonthlyActual(month, maintenanceId, 50.0);
+
+        BudgetLine parent = findLine(service.loadMonth(month).mandatory(), autoId);
+        BudgetLine fuel = findLine(service.loadMonth(month).mandatory(), fuelId);
+        BudgetLine maintenance = findLine(service.loadMonth(month).mandatory(), maintenanceId);
+
+        assertTrue(parent.master());
+        assertEquals(130.0, parent.actualAmount());
+        assertEquals(400.0, parent.budgetAmount());
+        assertEquals(270.0, parent.difference());
+        assertEquals(270.0, parent.balance());
+
+        assertTrue(fuel.childOfMaster());
+        assertTrue(maintenance.childOfMaster());
+        assertEquals(125.0, fuel.budgetAmount());
+        assertEquals(175.0, maintenance.budgetAmount());
+    }
+
+    @Test
+    void editingMasterCategoryBalancePersistsDisplayedValue() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int autoId = repository.findOrCreateCategory("Auto", "Auto", null, 1, CategoryType.MANDATORY);
+        int fuelId = repository.findOrCreateCategory("Fuel", "Auto/Fuel", autoId, 2, CategoryType.MANDATORY);
+        repository.markRollup(autoId);
+        service.updateMasterCategory(autoId, true);
+
+        YearMonth month = YearMonth.of(2026, Month.APRIL);
+        repository.upsertMonthlyBudget(month, autoId, 300.0);
+        repository.upsertMonthlyActual(month, fuelId, 90.0);
+
+        service.updateBalance(month, autoId, 500.0);
+
+        BudgetLine parent = findLine(service.loadMonth(month).mandatory(), autoId);
+        double storedOverride = repository.getMonthlyBalanceOverrides(month).get(autoId);
+
+        assertEquals(500.0, parent.balance());
+        assertEquals(290.0, storedOverride);
+    }
+
+    @Test
+    void leafCategoryCannotBecomeMasterCategory() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int leafId = repository.findOrCreateCategory("Fuel", "Fuel", null, 1, CategoryType.MANDATORY);
+
+        assertThrows(IllegalArgumentException.class, () -> service.updateMasterCategory(leafId, true));
+    }
+
+    @Test
+    void addingParentCategoryAppearsInSelectedMonthSnapshot() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        YearMonth month = YearMonth.of(2026, Month.MARCH);
+        int categoryId = service.addCategory(month, "Utilities", null, CategoryType.MANDATORY);
+
+        BudgetLine line = findLine(service.loadMonth(month).mandatory(), categoryId);
+        assertEquals("Utilities", line.category());
+        assertEquals(0, line.depth());
+    }
+
+    @Test
+    void addingParentCategoryInIncomeAppearsInIncomeSnapshot() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        YearMonth month = YearMonth.of(2026, Month.MARCH);
+        int categoryId = service.addCategory(month, "Bonus", null, CategoryType.INCOME);
+
+        BudgetLine line = findLine(service.loadMonth(month).income(), categoryId);
+        assertEquals("Bonus", line.category());
+        assertEquals(0, line.depth());
+    }
+
+    @Test
+    void addingChildCategoryInheritsParentTypeAndDepth() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int parentId = repository.findOrCreateCategory("Auto", "Auto", null, 1, CategoryType.MANDATORY);
+        YearMonth month = YearMonth.of(2026, Month.APRIL);
+        repository.ensureMonthlyClassificationsFromDefaults(month);
+        repository.setMonthlyClassification(month, parentId, CategoryType.DISCRETIONARY);
+
+        int childId = service.addCategory(month, "Fuel", parentId, null);
+
+        BudgetLine line = findLine(service.loadMonth(month).discretionary(), childId);
+        assertEquals("Fuel", line.category());
+        assertEquals(1, line.depth());
+        assertEquals(CategoryType.DISCRETIONARY, repository.getCategoryDefaultType(childId));
+    }
+
+    @Test
+    void newCategoryIsVisibleInLaterMonthsWithoutImport() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        int seedId = repository.findOrCreateCategory("Seed", "Seed", null, 1, CategoryType.MANDATORY);
+        YearMonth march = YearMonth.of(2026, Month.MARCH);
+        YearMonth june = YearMonth.of(2026, Month.JUNE);
+        repository.setMonthlyClassification(march, seedId, CategoryType.MANDATORY);
+        repository.setMonthlyClassification(june, seedId, CategoryType.MANDATORY);
+
+        int newCategoryId = service.addCategory(march, "Internet", null, CategoryType.MANDATORY);
+
+        BudgetLine futureLine = findLine(service.loadMonth(june).mandatory(), newCategoryId);
+        assertEquals("Internet", futureLine.category());
+        assertTrue(repository.getMonthlyClassifications(june).containsKey(newCategoryId));
+    }
+
+    @Test
+    void deletingLeafRemovesCategoryAndMonthScopedRows() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        YearMonth march = YearMonth.of(2026, Month.MARCH);
+        YearMonth april = YearMonth.of(2026, Month.APRIL);
+        int categoryId = service.addCategory(march, "Streaming", null, CategoryType.DISCRETIONARY);
+
+        repository.upsertMonthlyActual(march, categoryId, 21.0);
+        repository.upsertMonthlyBudget(march, categoryId, 25.0);
+        repository.setMonthlyClassification(april, categoryId, CategoryType.DISCRETIONARY);
+        repository.upsertMonthlyBalanceOverride(april, categoryId, 44.0);
+        repository.setMonthlyHidden(april, categoryId, true);
+
+        service.deleteCategory(categoryId);
+
+        assertTrue(repository.getCategoryById(categoryId).isEmpty());
+        assertFalse(repository.getMonthlyActuals(march).containsKey(categoryId));
+        assertFalse(repository.getMonthlyBudgets(march).containsKey(categoryId));
+        assertFalse(repository.getMonthlyClassifications(april).containsKey(categoryId));
+        assertFalse(repository.getMonthlyBalanceOverrides(april).containsKey(categoryId));
+        assertFalse(repository.getMonthlyHiddenCategoryIds(april).contains(categoryId));
+    }
+
+    @Test
+    void deletingParentWithChildrenThrowsExpectedException() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        YearMonth month = YearMonth.of(2026, Month.MAY);
+        int parentId = service.addCategory(month, "Travel", null, CategoryType.DISCRETIONARY);
+        service.addCategory(month, "Flights", parentId, null);
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> service.deleteCategory(parentId));
+        assertEquals("Cannot delete a category that has subcategories.", exception.getMessage());
+    }
+
+    @Test
+    void rollupFlagIsSetAfterAddingChildAndClearedAfterDeletingLastChild() {
+        Database.initialize();
+        resetDatabase();
+
+        BudgetRepository repository = new BudgetRepository();
+        BudgetService service = new BudgetService(repository);
+
+        YearMonth month = YearMonth.of(2026, Month.JULY);
+        int parentId = service.addCategory(month, "House", null, CategoryType.MANDATORY);
+        int childId = service.addCategory(month, "Repairs", parentId, null);
+
+        assertTrue(repository.getCategoryById(parentId).orElseThrow().rollup());
+
+        service.deleteCategory(childId);
+
+        assertFalse(repository.getCategoryById(parentId).orElseThrow().rollup());
     }
 
     private BudgetLine findLine(java.util.List<BudgetLine> lines, int categoryId) {

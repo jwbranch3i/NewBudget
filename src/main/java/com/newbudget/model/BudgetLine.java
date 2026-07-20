@@ -10,6 +10,8 @@ public record BudgetLine(
     double balance,
     CategoryType type,
     boolean rollup,
+    boolean master,
+    boolean childOfMaster,
     boolean hidden
 ) {
 }
