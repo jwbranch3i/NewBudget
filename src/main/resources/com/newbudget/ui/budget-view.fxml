@@ -9,6 +9,7 @@
 <?import javafx.scene.control.MenuBar?>
 <?import javafx.scene.control.MenuItem?>
 <?import javafx.scene.control.SeparatorMenuItem?>
+<?import javafx.scene.control.TabPane?>
 <?import javafx.scene.control.TreeTableColumn?>
 <?import javafx.scene.control.TreeTableView?>
 <?import javafx.scene.layout.BorderPane?>
@@ -98,9 +99,11 @@
         </VBox>
     </top>
     <center>
-        <HBox spacing="12.0" styleClass="sections-root">
+        <VBox spacing="12.0" styleClass="sections-root">
             <children>
-                <VBox spacing="6.0" styleClass="section-card" HBox.hgrow="ALWAYS">
+                <HBox spacing="12.0" styleClass="sections-root" VBox.vgrow="ALWAYS">
+                    <children>
+                        <VBox spacing="6.0" styleClass="section-card" HBox.hgrow="ALWAYS">
                     <padding>
                         <Insets top="8.0" right="8.0" bottom="8.0" left="8.0" />
                     </padding>
@@ -115,7 +118,7 @@
                                 <TreeTableColumn fx:id="incomeBalanceColumn" prefWidth="110.0" text="Balance" />
                             </columns>
                         </TreeTableView>
-                        <GridPane styleClass="totals-row">
+                        <GridPane fx:id="incomeTotalsRow" styleClass="totals-row">
                             <columnConstraints>
                                 <ColumnConstraints prefWidth="290.0" />
                                 <ColumnConstraints prefWidth="110.0" />
@@ -132,8 +135,8 @@
                             </children>
                         </GridPane>
                     </children>
-                </VBox>
-                <VBox spacing="6.0" styleClass="section-card" HBox.hgrow="ALWAYS">
+                        </VBox>
+                        <VBox spacing="6.0" styleClass="section-card" HBox.hgrow="ALWAYS">
                     <padding>
                         <Insets top="8.0" right="8.0" bottom="8.0" left="8.0" />
                     </padding>
@@ -148,7 +151,7 @@
                                 <TreeTableColumn fx:id="mandatoryBalanceColumn" prefWidth="110.0" text="Balance" />
                             </columns>
                         </TreeTableView>
-                        <GridPane styleClass="totals-row">
+                        <GridPane fx:id="mandatoryTotalsRow" styleClass="totals-row">
                             <columnConstraints>
                                 <ColumnConstraints prefWidth="290.0" />
                                 <ColumnConstraints prefWidth="110.0" />
@@ -165,8 +168,8 @@
                             </children>
                         </GridPane>
                     </children>
-                </VBox>
-                <VBox spacing="6.0" styleClass="section-card" HBox.hgrow="ALWAYS">
+                        </VBox>
+                        <VBox spacing="6.0" styleClass="section-card" HBox.hgrow="ALWAYS">
                     <padding>
                         <Insets top="8.0" right="8.0" bottom="8.0" left="8.0" />
                     </padding>
@@ -181,7 +184,7 @@
                                 <TreeTableColumn fx:id="discretionaryBalanceColumn" prefWidth="110.0" text="Balance" />
                             </columns>
                         </TreeTableView>
-                        <GridPane styleClass="totals-row">
+                        <GridPane fx:id="discretionaryTotalsRow" styleClass="totals-row">
                             <columnConstraints>
                                 <ColumnConstraints prefWidth="290.0" />
                                 <ColumnConstraints prefWidth="110.0" />
@@ -198,9 +201,12 @@
                             </children>
                         </GridPane>
                     </children>
-                </VBox>
+                        </VBox>
+                    </children>
+                </HBox>
+                <TabPane fx:id="accountTabs" styleClass="account-tabs" VBox.vgrow="ALWAYS" />
             </children>
-        </HBox>
+        </VBox>
     </center>
     <bottom>
         <VBox alignment="CENTER" spacing="6.0" styleClass="bottom-summary" BorderPane.alignment="CENTER">

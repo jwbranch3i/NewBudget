@@ -9,7 +9,6 @@ import com.newbudget.service.BudgetService;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleStringProperty;
-import javafx.fxml.FXMLLoader;
 import javafx.collections.ListChangeListener;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
@@ -26,6 +25,8 @@ import javafx.scene.control.ChoiceDialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TreeItem;
@@ -34,8 +35,9 @@ import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableRow;
 import javafx.scene.control.TreeTableView;
 import javafx.scene.control.cell.TextFieldTreeTableCell;
-import javafx.scene.Parent;
-import javafx.scene.Scene;
+import javafx.scene.layout.ColumnConstraints;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.util.StringConverter;
@@ -52,6 +54,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.function.Consumer;
 import java.util.function.ToDoubleFunction;
 
@@ -70,9 +73,6 @@ public class BudgetViewController {
     private Stage stage;
     private YearMonth selectedMonth;
     private boolean updatingMonthPicker;
-    private Integer accountId;
-    private String accountName;
-
     @FXML
     private ComboBox<YearMonth> monthPicker;
     @FXML
@@ -90,11 +90,23 @@ public class BudgetViewController {
     private Button openAccountButton;
 
     @FXML
+    private TabPane accountTabs;
+
+    @FXML
     private TreeTableView<BudgetTableRow> incomeTable;
     @FXML
     private TreeTableView<BudgetTableRow> mandatoryTable;
     @FXML
     private TreeTableView<BudgetTableRow> discretionaryTable;
+
+    @FXML
+    private GridPane incomeTotalsRow;
+
+    @FXML
+    private GridPane mandatoryTotalsRow;
+
+    @FXML
+    private GridPane discretionaryTotalsRow;
 
     @FXML
     private TreeTableColumn<BudgetTableRow, String> incomeCategoryColumn;
@@ -237,8 +249,52 @@ public class BudgetViewController {
             row -> budgetService.updateMonthlyClassificationGroup(selectedMonth, row.getCategoryId(), CategoryType.MANDATORY)
         );
 
+        bindTotalsRowToColumns(
+            incomeTotalsRow,
+            incomeCategoryColumn,
+            incomeActualColumn,
+            incomeBudgetColumn,
+            incomeDifferenceColumn,
+            incomeBalanceColumn
+        );
+        bindTotalsRowToColumns(
+            mandatoryTotalsRow,
+            mandatoryCategoryColumn,
+            mandatoryActualColumn,
+            mandatoryBudgetColumn,
+            mandatoryDifferenceColumn,
+            mandatoryBalanceColumn
+        );
+        bindTotalsRowToColumns(
+            discretionaryTotalsRow,
+            discretionaryCategoryColumn,
+            discretionaryActualColumn,
+            discretionaryBudgetColumn,
+            discretionaryDifferenceColumn,
+            discretionaryBalanceColumn
+        );
+
         installReactiveSummaryListeners();
         initializeTotals();
+    }
+
+    private void bindTotalsRowToColumns(
+        GridPane totalsRow,
+        TreeTableColumn<BudgetTableRow, ?> categoryColumn,
+        TreeTableColumn<BudgetTableRow, ?> actualColumn,
+        TreeTableColumn<BudgetTableRow, ?> budgetColumn,
+        TreeTableColumn<BudgetTableRow, ?> differenceColumn,
+        TreeTableColumn<BudgetTableRow, ?> balanceColumn
+    ) {
+        if (totalsRow == null || totalsRow.getColumnConstraints().size() < 5) {
+            return;
+        }
+
+        totalsRow.getColumnConstraints().get(0).prefWidthProperty().bind(categoryColumn.widthProperty());
+        totalsRow.getColumnConstraints().get(1).prefWidthProperty().bind(actualColumn.widthProperty());
+        totalsRow.getColumnConstraints().get(2).prefWidthProperty().bind(budgetColumn.widthProperty());
+        totalsRow.getColumnConstraints().get(3).prefWidthProperty().bind(differenceColumn.widthProperty());
+        totalsRow.getColumnConstraints().get(4).prefWidthProperty().bind(balanceColumn.widthProperty());
     }
 
     public void initializeApp(
@@ -247,40 +303,13 @@ public class BudgetViewController {
         BudgetService budgetService,
         CsvActualImporter csvActualImporter
     ) {
-        initializeCommon(stage, repository, budgetService, csvActualImporter, null, null);
-    }
-
-    public void initializeAccountWindow(
-        Stage stage,
-        BudgetRepository repository,
-        BudgetService budgetService,
-        CsvActualImporter csvActualImporter,
-        AccountRecord account
-    ) {
-        initializeCommon(stage, repository, budgetService, csvActualImporter, account.id(), account.name());
-    }
-
-    private void initializeCommon(
-        Stage stage,
-        BudgetRepository repository,
-        BudgetService budgetService,
-        CsvActualImporter csvActualImporter,
-        Integer accountId,
-        String accountName
-    ) {
         this.stage = stage;
         this.repository = repository;
         this.budgetService = budgetService;
         this.csvActualImporter = csvActualImporter;
-        this.accountId = accountId;
-        this.accountName = accountName;
         YearMonth currentMonth = YearMonth.now(ZoneId.systemDefault());
         this.selectedMonth = determineInitialMonth(currentMonth, repository.getAvailableMonths());
-        if (this.stage != null && this.accountName != null) {
-            this.stage.setTitle("NewBudget - " + this.accountName);
-        }
         refreshMonths();
-        updateWindowModeControls();
         selectMonth(selectedMonth, false);
     }
 
@@ -403,12 +432,9 @@ public class BudgetViewController {
         }
 
         try {
-            int createdAccountId = budgetService.createAccount(name.get());
+            budgetService.createAccount(name.get());
             statusLabel.setText("Created account \"" + name.get() + "\".");
-            budgetService.getAccounts().stream()
-                .filter(account -> account.id() == createdAccountId)
-                .findFirst()
-                .ifPresent(this::openAccountWindow);
+            refreshAccountTabs();
         } catch (IllegalArgumentException ex) {
             showError("Create Account Failed", ex.getMessage());
         } catch (Exception ex) {
@@ -418,16 +444,13 @@ public class BudgetViewController {
 
     @FXML
     private void onOpenAccount() {
-        List<AccountRecord> accounts = budgetService.getAccounts();
-        if (accounts.isEmpty()) {
+        if (accountTabs == null || accountTabs.getTabs().isEmpty()) {
             showInfo("No Accounts", "Create an account before opening one.");
             return;
         }
 
-        Optional<AccountRecord> selectedAccount = accounts.size() == 1
-            ? Optional.of(accounts.get(0))
-            : promptForAccountSelection(accounts, "Open Account", "Select an account to open");
-        selectedAccount.ifPresent(this::openAccountWindow);
+        accountTabs.getSelectionModel().selectFirst();
+        accountTabs.requestFocus();
     }
 
     private Optional<NewCategoryInput> promptForNewCategoryInput() {
@@ -454,7 +477,7 @@ public class BudgetViewController {
                 String indent = "  ".repeat(depth);
                 return new ParentOption(category.id(), indent + category.name());
             })
-            .collect(Collectors.toList());
+            .toList();
 
         Dialog<NewCategoryInput> dialog = new Dialog<>();
         dialog.setTitle("Add Category");
@@ -884,32 +907,6 @@ public class BudgetViewController {
         return row;
     }
 
-    private void onAddChildCategory(BudgetTableRow parentRow) {
-        if (selectedMonth == null) {
-            showInfo("No Month Selected", "Select a month before adding categories.");
-            return;
-        }
-
-        Optional<String> name = promptForCategoryName(
-            "Add Child Category",
-            "Add child under " + parentRow.getCategory(),
-            "Enter child category name:"
-        );
-        if (name.isEmpty()) {
-            return;
-        }
-
-        try {
-            budgetService.addCategory(selectedMonth, name.get(), parentRow.getCategoryId(), null);
-            loadMonth(selectedMonth);
-            statusLabel.setText("Added child category \"" + name.get() + "\" for " + MONTH_DISPLAY.format(selectedMonth));
-        } catch (IllegalArgumentException ex) {
-            showError("Add Category Failed", ex.getMessage());
-        } catch (Exception ex) {
-            showError("Add Category Failed", "Unable to add category.");
-        }
-    }
-
     private void onAssignCategoryToAccount(BudgetTableRow row) {
         List<AccountRecord> accounts = budgetService.getAccounts();
         if (accounts.isEmpty()) {
@@ -927,41 +924,11 @@ public class BudgetViewController {
         try {
             budgetService.assignCategoryToAccount(targetAccount.get().id(), row.getCategoryId());
             statusLabel.setText("Assigned \"" + row.getCategory() + "\" to account \"" + targetAccount.get().name() + "\".");
+            refreshAccountTabs();
         } catch (IllegalArgumentException ex) {
             showError("Assign Account Failed", ex.getMessage());
         } catch (Exception ex) {
             showError("Assign Account Failed", "Unable to assign category to account.");
-        }
-    }
-
-    private void onAddParentCategory() {
-        if (selectedMonth == null) {
-            showInfo("No Month Selected", "Select a month before adding categories.");
-            return;
-        }
-
-        Optional<CategoryType> sectionType = promptForParentSection();
-        if (sectionType.isEmpty()) {
-            return;
-        }
-
-        Optional<String> name = promptForCategoryName(
-            "Add Parent Category",
-            "Create a new top-level category",
-            "Enter parent category name:"
-        );
-        if (name.isEmpty()) {
-            return;
-        }
-
-        try {
-            budgetService.addCategory(selectedMonth, name.get(), null, sectionType.get());
-            loadMonth(selectedMonth);
-            statusLabel.setText("Added parent category \"" + name.get() + "\" for " + MONTH_DISPLAY.format(selectedMonth));
-        } catch (IllegalArgumentException ex) {
-            showError("Add Category Failed", ex.getMessage());
-        } catch (Exception ex) {
-            showError("Add Category Failed", "Unable to add category.");
         }
     }
 
@@ -992,19 +959,6 @@ public class BudgetViewController {
         }
     }
 
-    private Optional<String> promptForCategoryName(String title, String header, String content) {
-        TextInputDialog dialog = new TextInputDialog();
-        dialog.setTitle(title);
-        dialog.setHeaderText(header);
-        dialog.setContentText(content);
-        Optional<String> value = dialog.showAndWait().map(String::trim);
-        if (value.isPresent() && value.get().isBlank()) {
-            showError("Add Category Failed", "Category name cannot be blank.");
-            return Optional.empty();
-        }
-        return value.filter(v -> !v.isBlank());
-    }
-
     private Optional<String> promptForAccountName() {
         TextInputDialog dialog = new TextInputDialog();
         dialog.setTitle("Create Account");
@@ -1025,49 +979,6 @@ public class BudgetViewController {
         dialog.setHeaderText(header);
         dialog.setContentText("Account:");
         return dialog.showAndWait();
-    }
-
-    private void openAccountWindow(AccountRecord account) {
-        try {
-            FXMLLoader loader = new FXMLLoader(getClass().getResource("/com/newbudget/ui/budget-view.fxml"));
-            Parent root = loader.load();
-            BudgetViewController controller = loader.getController();
-
-            Stage accountStage = new Stage();
-            controller.initializeAccountWindow(accountStage, repository, budgetService, csvActualImporter, account);
-
-            Scene scene = new Scene(root, 1600, 900);
-            scene.getStylesheets().add(getClass().getResource("/com/newbudget/ui/styles.css").toExternalForm());
-            accountStage.setTitle("NewBudget - " + account.name());
-            accountStage.setScene(scene);
-            accountStage.show();
-        } catch (Exception ex) {
-            showError("Open Account Failed", "Unable to open account window.");
-        }
-    }
-
-    private Optional<CategoryType> promptForParentSection() {
-        ChoiceDialog<String> dialog = new ChoiceDialog<>("Mandatory", List.of("Income", "Mandatory", "Discretionary"));
-        dialog.setTitle("Category Section");
-        dialog.setHeaderText("Choose section for new parent category");
-        dialog.setContentText("Section:");
-
-        Optional<String> selected = dialog.showAndWait();
-        if (selected.isEmpty()) {
-            return Optional.empty();
-        }
-
-        return Optional.of(parseParentSection(selected.get()));
-    }
-
-    private CategoryType parseParentSection(String section) {
-        if ("Income".equalsIgnoreCase(section)) {
-            return CategoryType.INCOME;
-        }
-        if ("Mandatory".equalsIgnoreCase(section)) {
-            return CategoryType.MANDATORY;
-        }
-        return CategoryType.DISCRETIONARY;
     }
 
     private void onShowHiddenToggled() {
@@ -1432,9 +1343,7 @@ public class BudgetViewController {
     private void loadMonth(YearMonth month) {
         try {
             boolean includeHidden = showHiddenToggle.isSelected();
-            MonthSnapshot snapshot = accountId == null
-                ? budgetService.loadMonth(month, includeHidden)
-                : budgetService.loadAccountMonth(accountId, month, includeHidden);
+            MonthSnapshot snapshot = budgetService.loadMonth(month, includeHidden);
             List<BudgetTableRow> income = snapshot.income().stream().map(BudgetTableRow::new).toList();
             List<BudgetTableRow> mandatory = snapshot.mandatory().stream().map(BudgetTableRow::new).toList();
             List<BudgetTableRow> discretionary = snapshot.discretionary().stream().map(BudgetTableRow::new).toList();
@@ -1444,27 +1353,116 @@ public class BudgetViewController {
             applySection(discretionaryTable, discretionary);
             refreshTotalsAndSummaryFromTables();
 
-            selectedMonthLabel.setText(accountName == null ? MONTH_DISPLAY.format(month) : accountName + " • " + MONTH_DISPLAY.format(month));
+            selectedMonthLabel.setText(MONTH_DISPLAY.format(month));
             statusLabel.setText(
                 includeHidden
                     ? "Showing " + MONTH_DISPLAY.format(month) + " (including hidden categories)"
                     : "Showing " + MONTH_DISPLAY.format(month)
             );
+            refreshAccountTabs();
         } catch (Exception ex) {
             showError("Load failed", ex.getMessage());
         }
     }
 
-    private void updateWindowModeControls() {
-        boolean accountMode = accountId != null;
-        if (createAccountButton != null) {
-            createAccountButton.setVisible(!accountMode);
-            createAccountButton.setManaged(!accountMode);
+    private void refreshAccountTabs() {
+        if (accountTabs == null || selectedMonth == null) {
+            return;
         }
-        if (openAccountButton != null) {
-            openAccountButton.setVisible(!accountMode);
-            openAccountButton.setManaged(!accountMode);
+
+        accountTabs.getTabs().clear();
+        for (AccountRecord account : budgetService.getAccounts()) {
+            accountTabs.getTabs().add(buildAccountTab(account));
         }
+
+        if (!accountTabs.getTabs().isEmpty() && accountTabs.getSelectionModel().getSelectedIndex() < 0) {
+            accountTabs.getSelectionModel().selectFirst();
+        }
+    }
+
+    private Tab buildAccountTab(AccountRecord account) {
+        MonthSnapshot snapshot = budgetService.loadAccountMonth(account.id(), selectedMonth, showHiddenToggle.isSelected());
+        List<BudgetTableRow> rows = Stream.of(snapshot.income(), snapshot.mandatory(), snapshot.discretionary())
+            .flatMap(List::stream)
+            .map(BudgetTableRow::new)
+            .toList();
+
+        TreeTableView<BudgetTableRow> table = createReadOnlyAccountTable();
+        applySection(table, rows);
+        GridPane totalsRow = createAccountTotalsRow(rows);
+
+        VBox content = new VBox(6.0);
+        content.getChildren().add(table);
+        content.getChildren().add(totalsRow);
+
+        Tab tab = new Tab(account.name(), content);
+        tab.setClosable(false);
+        return tab;
+    }
+
+    private GridPane createAccountTotalsRow(List<BudgetTableRow> rows) {
+        SectionTotals totals = calculateSectionTotals(rows);
+        NumberFormat money = NumberFormat.getCurrencyInstance(Locale.US);
+
+        GridPane grid = new GridPane();
+        grid.getStyleClass().add("totals-row");
+        grid.getColumnConstraints().add(new ColumnConstraints(CATEGORY_COL_WIDTH));
+        grid.getColumnConstraints().add(new ColumnConstraints(MONEY_COL_WIDTH));
+        grid.getColumnConstraints().add(new ColumnConstraints(MONEY_COL_WIDTH));
+        grid.getColumnConstraints().add(new ColumnConstraints(MONEY_COL_WIDTH));
+        grid.getColumnConstraints().add(new ColumnConstraints(MONEY_COL_WIDTH));
+
+        Label title = new Label("TOTAL");
+        title.getStyleClass().addAll("totals-cell", "totals-title");
+        grid.add(title, 0, 0);
+
+        Label actual = new Label(money.format(totals.actual()));
+        actual.getStyleClass().add("totals-cell");
+        grid.add(actual, 1, 0);
+
+        Label budget = new Label(money.format(totals.budget()));
+        budget.getStyleClass().add("totals-cell");
+        grid.add(budget, 2, 0);
+
+        Label difference = new Label(money.format(totals.difference()));
+        difference.getStyleClass().add("totals-cell");
+        grid.add(difference, 3, 0);
+
+        Label balance = new Label(money.format(totals.balance()));
+        balance.getStyleClass().add("totals-cell");
+        grid.add(balance, 4, 0);
+
+        return grid;
+    }
+
+    private TreeTableView<BudgetTableRow> createReadOnlyAccountTable() {
+        TreeTableView<BudgetTableRow> table = new TreeTableView<>();
+        table.setShowRoot(false);
+        table.setEditable(false);
+
+        TreeTableColumn<BudgetTableRow, String> categoryColumn = new TreeTableColumn<>("Category");
+        TreeTableColumn<BudgetTableRow, Number> actualColumn = new TreeTableColumn<>("Actual");
+        TreeTableColumn<BudgetTableRow, Number> budgetColumn = new TreeTableColumn<>("Budget");
+        TreeTableColumn<BudgetTableRow, Number> differenceColumn = new TreeTableColumn<>("Diff");
+        TreeTableColumn<BudgetTableRow, Number> balanceColumn = new TreeTableColumn<>("Balance");
+
+        configureCategoryColumn(categoryColumn);
+        configureMoneyColumn(actualColumn, BudgetTableRow::getActualAmount, NumberFormat.getCurrencyInstance(Locale.US), false);
+        configureMoneyColumn(budgetColumn, BudgetTableRow::getBudgetAmount, NumberFormat.getCurrencyInstance(Locale.US), false);
+        configureMoneyColumn(
+            differenceColumn,
+            row -> row.isRollup() ? row.getBudgetAmount() - row.getActualAmount() : row.getDifference(),
+            NumberFormat.getCurrencyInstance(Locale.US),
+            false
+        );
+        configureMoneyColumn(balanceColumn, BudgetTableRow::getBalance, NumberFormat.getCurrencyInstance(Locale.US), false);
+
+        table.getColumns().add(categoryColumn);
+        table.getColumns().add(actualColumn);
+        table.getColumns().add(budgetColumn);
+        table.getColumns().add(differenceColumn);
+        table.getColumns().add(balanceColumn);
+        return table;
     }
 
     private void selectMonth(YearMonth month, boolean ensureMonthExists) {
